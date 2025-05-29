@@ -2,6 +2,9 @@ import csv
 import hashlib
 import io
 
+# Test wijziging voor VSCode Git integratie
+
+
 def generate_transaction_hash(jaar, maand, dag, naam, bedrag, code, mededelingen, tegenrekening):
     """Verbeterde hash functie - meer robuust voor subtiele verschillen"""
     # Converteer bedrag naar string met vaste precisie
