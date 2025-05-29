@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}Categorieën - ING Transactie Verwerker{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-tags me-2"></i>Categorieën</h2>
+        <p class="text-muted">Beheer je transactie categorieën en krijg inzicht in je uitgavenpatronen.</p>
+    </div>
+</div>
+
+<!-- Nieuwe categorie toevoegen -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-plus me-2"></i>Nieuwe Categorie</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('nieuwe_categorie') }}">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="naam" class="form-label">Naam *</label>
+                                <input type="text" class="form-control" id="naam" name="naam" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="beschrijving" class="form-label">Beschrijving</label>
+                                <input type="text" class="form-control" id="beschrijving" name="beschrijving">
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="mb-3">
+                                <label for="kleur" class="form-label">Kleur</label>
+                                <input type="color" class="form-control form-control-color" id="kleur" name="kleur" value="#3498db">
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="mb-3">
+                                <label class="form-label">&nbsp;</label>
+                                <button type="submit" class="btn btn-primary d-block w-100">
+                                    <i class="fas fa-plus me-1"></i>Toevoegen
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistieken -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-pie fa-2x text-primary mb-2"></i>
+                <h4>{{ categorien|length }}</h4>
+                <p class="text-muted mb-0">Actieve Categorieën</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body text-center">
+                <i class="fas fa-question-circle fa-2x text-warning mb-2"></i>
+                <h4>{{ zonder_categorie }}</h4>
+                <p class="text-muted mb-0">Zonder Categorie</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bestaande categorieën -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-list me-2"></i>Bestaande Categorieën</h5>
+            </div>
+            <div class="card-body p-0">
+                {% if categorien %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Categorie</th>
+                                <th>Beschrijving</th>
+                                <th>Transacties</th>
+                                <th>Uitgaven</th>
+                                <th>Inkomsten</th>
+                                <th>Acties</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for cat in categorien %}
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="color-indicator me-2" style="width: 20px; height: 20px; background-color: {{ cat[3] }}; border-radius: 50%;"></div>
+                                        <strong>{{ cat[1] }}</strong>
+                                    </div>
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ cat[2] or '-' }}</small>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info">{{ cat[4] }}</span>
+                                    {% if cat[4] > 0 %}
+                                    <a href="{{ url_for('categorie_suggesties', categorie_id=cat[0]) }}" class="btn btn-sm btn-outline-success ms-2">
+                                        <i class="fas fa-magic me-1"></i>Suggesties
+                                    </a>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cat[5] < 0 %}
+                                    <span class="transaction-negative">€{{ "%.2f"|format(cat[5]) }}</span>
+                                    {% else %}
+                                    <span class="text-muted">€0,00</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if cat[6] > 0 %}
+                                    <span class="transaction-positive">€{{ "%.2f"|format(cat[6]) }}</span>
+                                    {% else %}
+                                    <span class="text-muted">€0,00</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-outline-primary" onclick="editCategory({{ cat[0] }}, '{{ cat[1] }}', '{{ cat[2] or '' }}', '{{ cat[3] }}')">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <form method="POST" action="{{ url_for('verwijder_categorie', categorie_id=cat[0]) }}" class="d-inline" onsubmit="return confirm('Weet je zeker dat je deze categorie wilt verwijderen?')">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-tags fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">Nog geen categorieën</h5>
+                    <p class="text-muted">Voeg je eerste categorie toe om te beginnen!</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Categorie Bewerken</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editForm" method="POST">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="editNaam" class="form-label">Naam *</label>
+                        <input type="text" class="form-control" id="editNaam" name="naam" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editBeschrijving" class="form-label">Beschrijving</label>
+                        <input type="text" class="form-control" id="editBeschrijving" name="beschrijving">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editKleur" class="form-label">Kleur</label>
+                        <input type="color" class="form-control form-control-color" id="editKleur" name="kleur">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuleren</button>
+                    <button type="submit" class="btn btn-primary">Opslaan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function editCategory(id, naam, beschrijving, kleur) {
+    document.getElementById('editForm').action = `/categorien/${id}/bewerken`;
+    document.getElementById('editNaam').value = naam;
+    document.getElementById('editBeschrijving').value = beschrijving;
+    document.getElementById('editKleur').value = kleur;
+    new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+</script>
+{% endblock %}

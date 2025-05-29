@@ -1,0 +1,72 @@
+<!-- ========================== -->
+<!-- index.html -->
+<!-- ========================== -->
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="jumbotron bg-light p-5 rounded">
+            <h1 class="display-4">ING Transactie Verwerker</h1>
+            <p class="lead">Upload en beheer je ING transactiebestanden eenvoudig.</p>
+            <hr class="my-4">
+            <p>Deze tool helpt je om je ING CSV-bestanden te importeren, categoriseren en analyseren.</p>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-upload fa-3x text-primary mb-3"></i>
+                <h5 class="card-title">Importeren</h5>
+                <p class="card-text">Upload je ING CSV-bestanden en importeer transacties automatisch.</p>
+                <a href="{{ url_for('importeren') }}" class="btn btn-primary">
+                    <i class="fas fa-arrow-right me-1"></i>Start Importeren
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-list fa-3x text-success mb-3"></i>
+                <h5 class="card-title">Transacties</h5>
+                <p class="card-text">Bekijk, zoek en beheer al je geïmporteerde transacties.</p>
+                <a href="{{ url_for('transacties') }}" class="btn btn-success">
+                    <i class="fas fa-arrow-right me-1"></i>Bekijk Transacties
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-tags fa-3x text-warning mb-3"></i>
+                <h5 class="card-title">Categorieën</h5>
+                <p class="card-text">Beheer je categorieën en wijs transacties toe voor beter overzicht.</p>
+                <a href="{{ url_for('categorien') }}" class="btn btn-warning">
+                    <i class="fas fa-arrow-right me-1"></i>Beheer Categorieën
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-bar fa-3x text-info mb-3"></i>
+                <h5 class="card-title">Rapportages</h5>
+                <p class="card-text">Analyseer je uitgaven met kruistabellen en krijg inzicht in patronen.</p>
+                <a href="{{ url_for('rapportages') }}" class="btn btn-info">
+                    <i class="fas fa-arrow-right me-1"></i>Bekijk Rapportages
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

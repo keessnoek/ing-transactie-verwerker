@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}Transacties - ING Transactie Verwerker{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-list me-2"></i>Transacties</h2>
+        <p class="text-muted">Overzicht van al je geïmporteerde transacties.</p>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <div class="col-md-6">
+        <form method="GET" action="{{ url_for('transacties') }}">
+            <div class="input-group">
+                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                <input type="text" class="form-control" name="zoek" 
+                       value="{{ zoekterm or '' }}" 
+                       placeholder="Zoeken in transacties...">
+                <button class="btn btn-primary" type="submit">Zoek</button>
+                {% if zoekterm %}
+                <a href="{{ url_for('transacties') }}" class="btn btn-outline-secondary">Wissen</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+    <div class="col-md-6 text-end">
+        <div class="btn-group">
+            <button class="btn btn-outline-secondary btn-sm" onclick="toggleColumn('tegenrekening')">
+                <i class="fas fa-eye-slash me-1"></i>Tegenrekening
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="toggleColumn('mededelingen')">
+                <i class="fas fa-eye-slash me-1"></i>Mededelingen
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Resultaten info -->
+{% if zoekterm %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <i class="fas fa-search me-2"></i>
+            <strong>{{ getoond_resultaten }}</strong> van <strong>{{ totaal_resultaten }}</strong> resultaten voor "<strong>{{ zoekterm }}</strong>"
+            {% if getoond_resultaten < totaal_resultaten %}
+            <br><small>Er worden maximaal 1000 resultaten getoond. Verfijn je zoekopdracht voor meer specifieke resultaten.</small>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="transactiesTable">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Datum</th>
+                                <th>Naam</th>
+                                <th>Bedrag</th>
+                                <th>Code</th>
+                                <th class="tegenrekening-col">Tegenrekening</th>
+                                <th class="mededelingen-col">Mededelingen</th>
+                                <th>Saldo</th>
+                                <th>Categorie</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for transactie in transacties %}
+                            <tr>
+                                <td>{{ transactie[1] }}</td>
+                                <td>{{ transactie[2] }}</td>
+                                <td>
+                                    <span class="{% if transactie[3] >= 0 %}transaction-positive{% else %}transaction-negative{% endif %}">
+                                        €{{ "%.2f"|format(transactie[3]) }}
+                                    </span>
+                                </td>
+                                <td><span class="badge bg-secondary">{{ transactie[4] }}</span></td>
+                                <td class="tegenrekening-col">
+                                    {% if transactie[6] %}
+                                        <small class="text-muted">{{ transactie[6] }}</small>
+                                    {% else %}
+                                        <small class="text-muted">-</small>
+                                    {% endif %}
+                                </td>
+                                <td class="mededelingen-col">
+                                    {% if transactie[5] %}
+                                        <small class="text-muted" title="{{ transactie[5] }}">
+                                            {{ transactie[5][:50] }}{% if transactie[5]|length > 50 %}...{% endif %}
+                                        </small>
+                                    {% else %}
+                                        <small class="text-muted">-</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <small class="text-muted">€{{ "%.2f"|format(transactie[7]) }}</small>
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm categorie-select" 
+                                            data-transactie-id="{{ transactie[0] }}"
+                                            onchange="updateCategorie(this)">
+                                        <option value="">Geen categorie</option>
+                                        {% for cat in alle_categorien %}
+                                        <option value="{{ cat[0] }}" 
+                                                {% if transactie[9] == cat[0] %}selected{% endif %}>
+                                            {{ cat[1] }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        {% if not transacties %}
+        <div class="text-center mt-5">
+            {% if zoekterm %}
+            <i class="fas fa-search fa-3x text-muted mb-3"></i>
+            <h5 class="text-muted">Geen resultaten gevonden</h5>
+            <p class="text-muted">Probeer een andere zoekopdracht.</p>
+            {% else %}
+            <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+            <h5 class="text-muted">Nog geen transacties</h5>
+            <p class="text-muted">Begin met het <a href="{{ url_for('importeren') }}">importeren van een CSV-bestand</a>.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Loading indicator -->
+<div id="loadingIndicator" class="position-fixed top-50 start-50 translate-middle d-none">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Toggle kolommen
+function toggleColumn(columnClass) {
+    const columns = document.querySelectorAll('.' + columnClass + '-col');
+    const isHidden = columns[0].style.display === 'none';
+    
+    columns.forEach(col => {
+        col.style.display = isHidden ? '' : 'none';
+    });
+    
+    // Update button text
+    const button = event.target.closest('button');
+    const icon = button.querySelector('i');
+    if (isHidden) {
+        icon.className = 'fas fa-eye-slash me-1';
+    } else {
+        icon.className = 'fas fa-eye me-1';
+    }
+}
+
+// Update categorie via AJAX
+function updateCategorie(selectElement) {
+    const transactieId = selectElement.getAttribute('data-transactie-id');
+    const categorieId = selectElement.value;
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    
+    // Toon loading indicator
+    loadingIndicator.classList.remove('d-none');
+    
+    // Stuur AJAX request
+    fetch('/transacties/update-categorie', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `transactie_id=${transactieId}&categorie_id=${categorieId}`
+    })
+    .then(response => {
+        if (response.ok) {
+            // Toon success feedback
+            selectElement.style.backgroundColor = '#d4edda';
+            setTimeout(() => {
+                selectElement.style.backgroundColor = '';
+            }, 1000);
+        } else {
+            throw new Error('Network response was not ok');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Er is een fout opgetreden bij het opslaan van de categorie.');
+        // Reset selectie bij fout
+        selectElement.selectedIndex = 0;
+    })
+    .finally(() => {
+        // Verberg loading indicator
+        loadingIndicator.classList.add('d-none');
+    });
+}
+</script>
+{% endblock %}

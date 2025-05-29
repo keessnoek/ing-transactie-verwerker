@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}Suggesties voor {{ categorie }} - ING Transactie Verwerker{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('categorien') }}">Categorieën</a></li>
+                <li class="breadcrumb-item active">Suggesties voor "{{ categorie }}"</li>
+            </ol>
+        </nav>
+        
+        <h2><i class="fas fa-magic me-2"></i>Suggesties voor "{{ categorie }}"</h2>
+        <p class="text-muted">Onderstaande transacties lijken op transacties die al zijn gecategoriseerd als "{{ categorie }}". Selecteer welke je wilt toevoegen.</p>
+    </div>
+</div>
+
+<!-- Bulk winkel-opties -->
+{% if winkel_patronen %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-success">
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="fas fa-store me-2"></i>Bulk Winkel-toewijzing</h5>
+                <small class="text-muted">Wijs alle transacties van een winkel in één keer toe</small>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for winkel, aantal in winkel_patronen.items() %}
+                    <div class="col-md-6 mb-3">
+                        <div class="d-flex justify-content-between align-items-center p-3 border rounded">
+                            <div>
+                                <strong>{{ winkel }}</strong>
+                                <br><small class="text-muted">{{ aantal }} ongecategoriseerde transacties</small>
+                            </div>
+                            <form method="POST" action="{{ url_for('bulk_winkel_toewijzen') }}" class="d-inline">
+                                <input type="hidden" name="categorie_id" value="{{ categorie_id }}">
+                                <input type="hidden" name="winkel_naam" value="{{ winkel }}">
+                                <button type="submit" class="btn btn-success btn-sm" 
+                                        onclick="return confirm('Alle {{ aantal }} {{ winkel }} transacties toewijzen aan {{ categorie }}?')">
+                                    <i class="fas fa-magic me-1"></i>Alle {{ winkel }}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if suggesties %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between">
+                <h5 class="mb-0">{{ suggesties|length }} individuele matches gevonden</h5>
+                <div>
+                    <button class="btn btn-sm btn-outline-primary" onclick="selectAll()">Alles selecteren</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="selectNone()">Niets selecteren</button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <form method="POST" action="{{ url_for('bulk_toewijzen') }}">
+                    <input type="hidden" name="categorie_id" value="{{ categorie_id }}">
+                    
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th width="50">
+                                        <input type="checkbox" id="selectAllCheckbox" onchange="toggleAll()">
+                                    </th>
+                                    <th>Datum</th>
+                                    <th>Naam</th>
+                                    <th>Bedrag</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for suggestie in suggesties %}
+                                <tr>
+                                    <td>
+                                        <input type="checkbox" name="transactie_ids" value="{{ suggestie[0] }}" class="transaction-checkbox">
+                                    </td>
+                                    <td>{{ suggestie[1] }}</td>
+                                    <td>{{ suggestie[2] }}</td>
+                                    <td>
+                                        <span class="{% if suggestie[3] >= 0 %}transaction-positive{% else %}transaction-negative{% endif %}">
+                                            €{{ "%.2f"|format(suggestie[3]) }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="card-footer">
+                        <div class="d-flex justify-content-between">
+                            <a href="{{ url_for('categorien') }}" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left me-1"></i>Terug
+                            </a>
+                            <button type="submit" class="btn btn-success" id="submitBtn" disabled>
+                                <i class="fas fa-check me-1"></i>Geselecteerde toewijzen aan "{{ categorie }}"
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="row">
+    <div class="col-12">
+        <div class="text-center mt-5">
+            <i class="fas fa-search fa-3x text-muted mb-3"></i>
+            <h5 class="text-muted">Geen suggesties gevonden</h5>
+            <p class="text-muted">Er zijn geen transacties gevonden die lijken op de categorie "{{ categorie }}".</p>
+            <a href="{{ url_for('categorien') }}" class="btn btn-primary">
+                <i class="fas fa-arrow-left me-1"></i>Terug naar Categorieën
+            </a>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const checkboxes = document.querySelectorAll('.transaction-checkbox');
+const submitBtn = document.getElementById('submitBtn');
+const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+
+function updateSubmitButton() {
+    const checked = document.querySelectorAll('.transaction-checkbox:checked').length;
+    if (submitBtn) {
+        submitBtn.disabled = checked === 0;
+        submitBtn.innerHTML = checked > 0 
+            ? `<i class="fas fa-check me-1"></i>${checked} toewijzen aan "{{ categorie }}"`
+            : `<i class="fas fa-check me-1"></i>Geselecteerde toewijzen aan "{{ categorie }}"`;
+    }
+}
+
+function toggleAll() {
+    const isChecked = selectAllCheckbox.checked;
+    checkboxes.forEach(cb => cb.checked = isChecked);
+    updateSubmitButton();
+}
+
+function selectAll() {
+    checkboxes.forEach(cb => cb.checked = true);
+    if (selectAllCheckbox) selectAllCheckbox.checked = true;
+    updateSubmitButton();
+}
+
+function selectNone() {
+    checkboxes.forEach(cb => cb.checked = false);
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+    updateSubmitButton();
+}
+
+checkboxes.forEach(cb => {
+    cb.addEventListener('change', updateSubmitButton);
+});
+
+// Initial check
+updateSubmitButton();
+</script>
+{% endblock %}
