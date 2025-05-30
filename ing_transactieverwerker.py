@@ -7,6 +7,8 @@ from datetime import datetime
 from werkzeug.utils import secure_filename
 import io
 
+# Test 2
+
 app = Flask(__name__)
 app.secret_key = 'jouw_geheime_sleutel_hier'  # Verander dit naar iets veiligs!
 app.config['UPLOAD_FOLDER'] = 'uploads'
