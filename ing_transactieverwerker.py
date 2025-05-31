@@ -613,10 +613,11 @@ def rapportages():
     conn.close()
     
     return render_template('rapportages.html', jaren=jaren, huidig_jaar=int(huidig_jaar))
+# Vervang je bestaande /rapportages/kruistabel route met deze versie:
 
 @app.route('/rapportages/kruistabel')
 def kruistabel_data():
-    """API endpoint voor kruistabel data"""
+    """API endpoint voor kruistabel data - nu met categorie IDs!"""
     jaar = request.args.get('jaar', type=int)
     
     if not jaar:
@@ -631,6 +632,7 @@ def kruistabel_data():
     
     # Bouw de kruistabel data
     kruistabel_data = {}
+    categorie_ids = {}  # Nieuwe mapping van naam naar ID
     maand_totalen = {i: 0 for i in range(1, 13)}  # Totalen per maand
     categorie_totalen = {}  # Totalen per categorie
     
@@ -645,6 +647,7 @@ def kruistabel_data():
         
         maand_bedragen = dict(cursor.fetchall())
         kruistabel_data[cat_naam] = {}
+        categorie_ids[cat_naam] = cat_id  # Sla ID op!
         categorie_totaal = 0
         
         for maand in range(1, 13):
@@ -665,6 +668,7 @@ def kruistabel_data():
     
     maand_bedragen = dict(cursor.fetchall())
     kruistabel_data['Zonder categorie'] = {}
+    categorie_ids['Zonder categorie'] = None  # Expliciet None voor zonder categorie
     zonder_categorie_totaal = 0
     
     for maand in range(1, 13):
@@ -682,12 +686,179 @@ def kruistabel_data():
     
     return jsonify({
         'data': kruistabel_data,
+        'categorie_ids': categorie_ids,  # NIEUWE data voor frontend!
         'maand_totalen': maand_totalen,
         'categorie_totalen': categorie_totalen,
         'grand_total': grand_total,
         'jaar': jaar
     })
 
+# Vervang je /rapportages/transactie-details route met deze versie:
+# Dit is de originele debug-versie maar dan met de juiste JSON output!
+
+@app.route('/rapportages/transactie-details')
+def transactie_details():
+    """DEBUG versie - laat alles zien maar met juiste JSON"""
+    jaar = request.args.get('jaar', type=int)
+    maand = request.args.get('maand', type=int)
+    categorie_id_str = request.args.get('categorie_id')
+    
+    # DEBUG: Print alle parameters
+    print(f"DEBUG - Ontvangen parameters:")
+    print(f"  jaar: {jaar} (type: {type(jaar)})")
+    print(f"  maand: {maand} (type: {type(maand)})")
+    print(f"  categorie_id_str: '{categorie_id_str}' (type: {type(categorie_id_str)})")
+    
+    # Validatie
+    if not jaar or not maand:
+        return jsonify({'error': 'Jaar en maand parameters zijn verplicht'}), 400
+    
+    if maand < 1 or maand > 12:
+        return jsonify({'error': 'Maand moet tussen 1 en 12 zijn'}), 400
+    
+    # Converteer categorie_id
+    categorie_id = None
+    if categorie_id_str and categorie_id_str != 'null':
+        try:
+            categorie_id = int(categorie_id_str)
+            print(f"DEBUG - Geconverteerde categorie_id: {categorie_id} (type: {type(categorie_id)})")
+        except ValueError:
+            print(f"DEBUG - FOUT bij converteren van categorie_id: '{categorie_id_str}'")
+            return jsonify({'error': 'Ongeldige categorie_id'}), 400
+    else:
+        print(f"DEBUG - categorie_id blijft None (zonder categorie)")
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # DEBUG: Kijk welke categorieën er überhaupt bestaan
+    cursor.execute('SELECT id, naam FROM categorien ORDER BY id')
+    alle_categorien = cursor.fetchall()
+    print(f"DEBUG - Alle categorieën in database:")
+    for cat in alle_categorien:
+        print(f"  ID {cat[0]}: {cat[1]}")
+    
+    # Bouw query op basis van categorie
+    if categorie_id is not None:
+        print(f"DEBUG - Zoeken naar transacties met categorie_id = {categorie_id}")
+        
+        # TEST: Kijk eerst of de categorie bestaat
+        cursor.execute('SELECT naam FROM categorien WHERE id = ?', (categorie_id,))
+        categorie_check = cursor.fetchone()
+        if categorie_check:
+            print(f"DEBUG - Categorie {categorie_id} bestaat: {categorie_check[0]}")
+            categorie_naam = categorie_check[0]
+        else:
+            print(f"DEBUG - PROBLEEM: Categorie {categorie_id} bestaat NIET in database!")
+            return jsonify({'error': f'Categorie {categorie_id} niet gevonden'}), 404
+        
+        # TEST: Kijk hoeveel transacties er zijn voor dit jaar/maand
+        cursor.execute('SELECT COUNT(*) FROM transacties WHERE jaar = ? AND maand = ?', (jaar, maand))
+        totaal_count = cursor.fetchone()[0]
+        print(f"DEBUG - Totaal transacties voor {jaar}-{maand}: {totaal_count}")
+        
+        # TEST: Kijk hoeveel transacties er zijn voor deze categorie in dit jaar/maand
+        cursor.execute('SELECT COUNT(*) FROM transacties WHERE jaar = ? AND maand = ? AND categorie_id = ?', 
+                      (jaar, maand, categorie_id))
+        categorie_count = cursor.fetchone()[0]
+        print(f"DEBUG - Transacties voor categorie {categorie_id} in {jaar}-{maand}: {categorie_count}")
+        
+        # Als er geen transacties zijn, probeer zonder jaar/maand filter
+        if categorie_count == 0:
+            cursor.execute('SELECT COUNT(*) FROM transacties WHERE categorie_id = ?', (categorie_id,))
+            categorie_totaal = cursor.fetchone()[0]
+            print(f"DEBUG - Totaal transacties voor categorie {categorie_id} (alle jaren/maanden): {categorie_totaal}")
+        
+        # Hoofdquery - EXACTE KOPIE VAN ORIGINELE DEBUG
+        cursor.execute('''
+            SELECT t.id, t.datum, t.naam, t.bedrag, t.code, t.mededelingen, 
+                   t.tegenrekening, c.naam as categorie_naam
+            FROM transacties t
+            LEFT JOIN categorien c ON t.categorie_id = c.id
+            WHERE t.jaar = ? AND t.maand = ? AND t.categorie_id = ?
+            ORDER BY t.datum DESC, t.bedrag DESC
+        ''', (jaar, maand, categorie_id))
+        
+    else:
+        print(f"DEBUG - Zoeken naar transacties ZONDER categorie")
+        
+        # TEST: Kijk hoeveel transacties er zijn zonder categorie
+        cursor.execute('SELECT COUNT(*) FROM transacties WHERE jaar = ? AND maand = ? AND categorie_id IS NULL', 
+                      (jaar, maand))
+        zonder_count = cursor.fetchone()[0]
+        print(f"DEBUG - Transacties zonder categorie in {jaar}-{maand}: {zonder_count}")
+        
+        cursor.execute('''
+            SELECT t.id, t.datum, t.naam, t.bedrag, t.code, t.mededelingen, 
+                   t.tegenrekening, 'Zonder categorie' as categorie_naam
+            FROM transacties t
+            WHERE t.jaar = ? AND t.maand = ? AND t.categorie_id IS NULL
+            ORDER BY t.datum DESC, t.bedrag DESC
+        ''', (jaar, maand))
+        
+        categorie_naam = 'Zonder categorie'
+    
+    transacties = cursor.fetchall()
+    print(f"DEBUG - Gevonden transacties: {len(transacties)}")
+    
+    # Toon eerste paar transacties als voorbeeld
+    if transacties:
+        print(f"DEBUG - Eerste transactie: {transacties[0]}")
+    
+    # Bereken statistieken
+    if transacties:
+        bedragen = [t[3] for t in transacties]
+        totaal_bedrag = sum(bedragen)
+        uitgaven = sum(b for b in bedragen if b < 0)
+        inkomsten = sum(b for b in bedragen if b > 0)
+        gemiddeld = totaal_bedrag / len(bedragen)
+    else:
+        totaal_bedrag = uitgaven = inkomsten = gemiddeld = 0
+    
+    # Maandnamen voor mooiere weergave
+    maand_namen = [
+        '', 'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
+        'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December'
+    ]
+    
+    conn.close()
+    
+    # Format transacties voor JSON - NU MET JUISTE STRUCTURE!
+    transacties_formatted = []
+    for t in transacties:
+        transacties_formatted.append({
+            'id': t[0],
+            'datum': t[1],
+            'naam': t[2],
+            'bedrag': t[3],
+            'bedrag_formatted': f"€{abs(t[3]):.2f}" if t[3] >= 0 else f"-€{abs(t[3]):.2f}",
+            'code': t[4],
+            'mededelingen': t[5] or '',
+            'tegenrekening': t[6] or '',
+            'categorie': t[7]
+        })
+    
+    return jsonify({
+        'transacties': transacties_formatted,
+        'statistieken': {
+            'aantal': len(transacties),
+            'totaal': totaal_bedrag,
+            'totaal_formatted': f"€{abs(totaal_bedrag):.2f}" if totaal_bedrag >= 0 else f"-€{abs(totaal_bedrag):.2f}",
+            'uitgaven': uitgaven,
+            'uitgaven_formatted': f"-€{abs(uitgaven):.2f}" if uitgaven < 0 else "€0,00",
+            'inkomsten': inkomsten, 
+            'inkomsten_formatted': f"€{inkomsten:.2f}",
+            'gemiddeld': gemiddeld,
+            'gemiddeld_formatted': f"€{abs(gemiddeld):.2f}" if gemiddeld >= 0 else f"-€{abs(gemiddeld):.2f}"
+        },
+        'context': {
+            'jaar': jaar,
+            'maand': maand,
+            'maand_naam': maand_namen[maand],
+            'categorie': categorie_naam,
+            'categorie_id': categorie_id
+        }
+    })
 
 if __name__ == '__main__':
     init_database()

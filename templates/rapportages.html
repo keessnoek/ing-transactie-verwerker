@@ -1,4 +1,4 @@
-<!-- rapportages.html -->
+<!-- Vervang je huidige rapportages.html volledig met deze versie -->
 {% extends "base.html" %}
 
 {% block title %}Rapportages - ING Transactie Verwerker{% endblock %}
@@ -7,7 +7,7 @@
 <div class="row">
     <div class="col-12">
         <h2><i class="fas fa-chart-bar me-2"></i>Rapportages</h2>
-        <p class="text-muted">Krijg inzicht in je uitgavenpatronen met overzichtelijke kruistabellen.</p>
+        <p class="text-muted">Krijg inzicht in je uitgavenpatronen met overzichtelijke kruistabellen. <span class="badge bg-info">Klik op cellen voor details!</span></p>
     </div>
 </div>
 
@@ -62,6 +62,7 @@
             <div class="card-header">
                 <h5 class="mb-0">
                     <i class="fas fa-table me-2"></i>Uitgaven per Maand per Categorie - <span id="tabelJaar">{{ huidig_jaar }}</span>
+                    <small class="text-muted ms-2"><i class="fas fa-mouse-pointer"></i> Klik op een cel voor details</small>
                 </h5>
             </div>
             <div class="card-body p-0">
@@ -113,6 +114,92 @@
     </div>
 </div>
 
+<!-- Transactie Details Modal -->
+<div class="modal fade" id="transactieModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">
+                    <i class="fas fa-list me-2"></i>Transactie Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Loading indicator voor modal -->
+                <div id="modalLoading" class="text-center py-5 d-none">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Transacties laden...</p>
+                </div>
+                
+                <!-- Statistieken -->
+                <div id="modalStats" class="row mb-4 d-none">
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body py-2">
+                                <h6 id="statAantal" class="mb-1">0</h6>
+                                <small class="text-muted">Transacties</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body py-2">
+                                <h6 id="statTotaal" class="mb-1">€0,00</h6>
+                                <small class="text-muted">Totaal</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body py-2">
+                                <h6 id="statUitgaven" class="mb-1 transaction-negative">€0,00</h6>
+                                <small class="text-muted">Uitgaven</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body py-2">
+                                <h6 id="statInkomsten" class="mb-1 transaction-positive">€0,00</h6>
+                                <small class="text-muted">Inkomsten</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Transacties tabel -->
+                <div id="modalTransacties" class="d-none">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Datum</th>
+                                    <th>Naam</th>
+                                    <th>Bedrag</th>
+                                    <th>Code</th>
+                                    <th>Mededelingen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modalTransactiesBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Geen data -->
+                <div id="modalGeenData" class="text-center py-5 d-none">
+                    <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                    <h6 class="text-muted">Geen transacties gevonden</h6>
+                    <p class="text-muted">Er zijn geen transacties voor deze periode/categorie combinatie.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% if not jaren %}
 <div class="row">
     <div class="col-12">
@@ -134,7 +221,6 @@ function formatBedrag(bedrag) {
     const absValue = Math.abs(bedrag);
     const formatted = '€' + absValue.toFixed(2);
     
-    // Kleur bepaling voor styling
     if (bedrag < 0) {
         return `<span class="transaction-negative">${formatted}</span>`;
     } else if (bedrag > 0) {
@@ -142,6 +228,105 @@ function formatBedrag(bedrag) {
     }
     return formatted;
 }
+
+function maakCelKlikbaar(bedrag, jaar, maand, categorieId, categorieNaam) {
+    // Alleen klikbaar maken als er een bedrag is
+    if (bedrag === 0) {
+        return formatBedrag(bedrag);
+    }
+    
+    return `<span class="kruistabel-cel" 
+                  data-jaar="${jaar}" 
+                  data-maand="${maand}" 
+                  data-categorie-id="${categorieId || 'null'}" 
+                  data-categorie-naam="${categorieNaam}"
+                  style="cursor: pointer; text-decoration: underline;" 
+                  onclick="toonTransactieDetails(${jaar}, ${maand}, '${categorieId || 'null'}', '${categorieNaam}')"
+                  title="Klik voor details">
+                ${formatBedrag(bedrag)}
+            </span>`;
+}
+
+function toonTransactieDetails(jaar, maand, categorieId, categorieNaam) {
+    // Modal openen
+    const modal = new bootstrap.Modal(document.getElementById('transactieModal'));
+    
+    // Maandnamen
+    const maandNamen = ['', 'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni', 
+                        'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December'];
+    
+    // Modal titel instellen
+    document.getElementById('modalTitle').innerHTML = 
+        `<i class="fas fa-list me-2"></i>${categorieNaam} - ${maandNamen[maand]} ${jaar}`;
+    
+    // Reset modal content
+    document.getElementById('modalLoading').classList.remove('d-none');
+    document.getElementById('modalStats').classList.add('d-none');
+    document.getElementById('modalTransacties').classList.add('d-none');
+    document.getElementById('modalGeenData').classList.add('d-none');
+    
+    modal.show();
+    
+    // Fetch transactie data
+    const url = `/rapportages/transactie-details?jaar=${jaar}&maand=${maand}&categorie_id=${categorieId}`;
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('modalLoading').classList.add('d-none');
+            
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            if (data.transacties.length === 0) {
+                document.getElementById('modalGeenData').classList.remove('d-none');
+                return;
+            }
+            
+            // Statistieken tonen
+            document.getElementById('statAantal').textContent = data.statistieken.aantal;
+            document.getElementById('statTotaal').textContent = data.statistieken.totaal_formatted;
+            document.getElementById('statUitgaven').textContent = data.statistieken.uitgaven_formatted;
+            document.getElementById('statInkomsten').textContent = data.statistieken.inkomsten_formatted;
+            document.getElementById('modalStats').classList.remove('d-none');
+            
+            // Transacties tabel vullen
+            const tbody = document.getElementById('modalTransactiesBody');
+            tbody.innerHTML = '';
+            
+            data.transacties.forEach(transactie => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td><small>${transactie.datum}</small></td>
+                    <td>${transactie.naam}</td>
+                    <td class="${transactie.bedrag >= 0 ? 'transaction-positive' : 'transaction-negative'}">
+                        ${transactie.bedrag_formatted}
+                    </td>
+                    <td><span class="badge bg-secondary">${transactie.code}</span></td>
+                    <td><small class="text-muted" title="${transactie.mededelingen}">
+                        ${transactie.mededelingen.length > 50 ? 
+                          transactie.mededelingen.substring(0, 50) + '...' : 
+                          transactie.mededelingen || '-'}
+                    </small></td>
+                `;
+            });
+            
+            document.getElementById('modalTransacties').classList.remove('d-none');
+        })
+        .catch(error => {
+            document.getElementById('modalLoading').classList.add('d-none');
+            console.error('Error:', error);
+            
+            // Error tonen in modal
+            document.getElementById('modalTransactiesBody').innerHTML = 
+                `<tr><td colspan="5" class="text-center text-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>Fout bij laden: ${error.message}
+                </td></tr>`;
+            document.getElementById('modalTransacties').classList.remove('d-none');
+        });
+}
+// Vervang de laadKruistabel functie in je rapportages.html met deze versie:
 
 function laadKruistabel() {
     const jaar = document.getElementById('jaarSelect').value;
@@ -163,7 +348,7 @@ function laadKruistabel() {
                 throw new Error(data.error);
             }
             
-            // Bouw tabel
+            // Bouw tabel met klikbare cellen
             let html = '';
             
             // Sorteer categorieën alfabetisch, maar 'Zonder categorie' onderaan
@@ -177,13 +362,16 @@ function laadKruistabel() {
                 const maandBedragen = data.data[categorie];
                 const categorieTotaal = data.categorie_totalen[categorie];
                 
+                // Haal het juiste categorie-ID op uit de data!
+                const categorieId = data.categorie_ids[categorie];
+                
                 html += `<tr>`;
                 html += `<td><strong>${categorie}</strong></td>`;
                 
-                // Bedragen per maand
+                // Bedragen per maand - nu met de juiste IDs!
                 for (let maand = 1; maand <= 12; maand++) {
                     const bedrag = maandBedragen[maand] || 0;
-                    html += `<td>${formatBedrag(bedrag)}</td>`;
+                    html += `<td>${maakCelKlikbaar(bedrag, jaar, maand, categorieId, categorie)}</td>`;
                 }
                 
                 // Totaal voor deze categorie
