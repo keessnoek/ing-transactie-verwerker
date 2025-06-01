@@ -1,0 +1,287 @@
+<!-- Voeg deze pagina toe als auto_categorisering.html in je templates folder -->
+
+{% extends "base.html" %}
+
+{% block title %}Automatische Categorisering - ING Transactie Verwerker{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-magic me-2"></i>Automatische Categorisering</h2>
+        <p class="text-muted">Laat slimme patronen je transacties automatisch categoriseren.</p>
+    </div>
+</div>
+
+<!-- Loading indicator -->
+<div id="loadingIndicator" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status"></div>
+    <p class="mt-2">Analyseren van transactiepatronen...</p>
+</div>
+
+<!-- Statistieken -->
+<div id="statistieken" class="row mb-4 d-none">
+    <div class="col-md-6">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 id="totaalOngecategoriseerd" class="text-warning">0</h4>
+                <p class="text-muted mb-0">Ongecategoriseerd</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card text-center">
+            <div class="card-body">
+                <h4 id="totaalGecategoriseerd" class="text-success">0</h4>
+                <p class="text-muted mb-0">Al Gecategoriseerd</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Categoriseer suggesties -->
+<div id="suggesties" class="row d-none">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-lightbulb me-2"></i>Automatische Categoriseer-Suggesties</h5>
+                <small class="text-muted">Klik op "Categoriseren" om de regels toe te passen</small>
+            </div>
+            <div class="card-body p-0">
+                <div id="suggestiesLijst">
+                    <!-- Wordt gevuld via JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Potentiële nieuwe patronen -->
+<div id="potentiele" class="row mt-4 d-none">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-search me-2"></i>Potentiële Nieuwe Patronen</h5>
+                <small class="text-muted">Transactienamen die vaak voorkomen maar nog geen categorie hebben</small>
+            </div>
+            <div class="card-body">
+                <div id="potentieleLijst" class="row">
+                    <!-- Wordt gevuld via JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Geen suggesties -->
+<div id="geenSuggesties" class="row d-none">
+    <div class="col-12">
+        <div class="text-center mt-5">
+            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+            <h5 class="text-muted">Geen automatische suggesties gevonden</h5>
+            <p class="text-muted">Al je transacties lijken al goed gecategoriseerd te zijn, of er zijn geen duidelijke patronen gevonden.</p>
+            <a href="{{ url_for('categorien') }}" class="btn btn-primary">
+                <i class="fas fa-arrow-left me-1"></i>Terug naar Categorieën
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    laadAnalyse();
+});
+
+function laadAnalyse() {
+    fetch('/rapportages/categoriseer-analyse')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('loadingIndicator').classList.add('d-none');
+            
+            // Update statistieken
+            document.getElementById('totaalOngecategoriseerd').textContent = data.totaal_ongecategoriseerd.toLocaleString();
+            document.getElementById('totaalGecategoriseerd').textContent = data.totaal_gecategoriseerd.toLocaleString();
+            document.getElementById('statistieken').classList.remove('d-none');
+            
+            // Toon suggesties
+            if (data.categoriseer_suggesties.length > 0) {
+                toonSuggesties(data.categoriseer_suggesties, data.bestaande_categorien);
+                document.getElementById('suggesties').classList.remove('d-none');
+            }
+            
+            // Toon potentiële patronen
+            if (data.potentiele_patronen.length > 0) {
+                toonPotentiele(data.potentiele_patronen);
+                document.getElementById('potentiele').classList.remove('d-none');
+            }
+            
+            // Als geen suggesties, toon melding
+            if (data.categoriseer_suggesties.length === 0 && data.potentiele_patronen.length === 0) {
+                document.getElementById('geenSuggesties').classList.remove('d-none');
+            }
+        })
+        .catch(error => {
+            document.getElementById('loadingIndicator').classList.add('d-none');
+            console.error('Error:', error);
+            alert('Fout bij laden van analyse: ' + error.message);
+        });
+}
+
+function toonSuggesties(suggesties, categorien) {
+    const container = document.getElementById('suggestiesLijst');
+    container.innerHTML = '';
+    
+    suggesties.forEach((suggestie, index) => {
+        const voorbeelden = suggestie.voorbeelden.join(', ');
+        const bedragFormatted = suggestie.totaal_bedrag.toLocaleString('nl-NL', {
+            style: 'currency',
+            currency: 'EUR'
+        });
+        
+        // Bepaal categorie opties
+        let categorieOpties = '';
+        if (suggestie.suggested_category_id) {
+            categorieOpties = `<option value="${suggestie.suggested_category_id}">${categorien[suggestie.suggested_category_id]} (aanbevolen)</option>`;
+        }
+        
+        // Voeg alle andere categorieën toe
+        Object.entries(categorien).forEach(([id, naam]) => {
+            if (id != suggestie.suggested_category_id) {
+                categorieOpties += `<option value="${id}">${naam}</option>`;
+            }
+        });
+        
+        const card = `
+            <div class="border-bottom p-3">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <h6 class="mb-1">${suggestie.categorie}</h6>
+                        <small class="text-muted">Patronen: ${voorbeelden}</small>
+                        <div class="mt-2">
+                            <span class="badge bg-primary">${suggestie.totaal_transacties} transacties</span>
+                            <span class="badge bg-success">${bedragFormatted}</span>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select form-select-sm" id="categorie_${index}">
+                            <option value="">Kies categorie...</option>
+                            ${categorieOpties}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-success btn-sm w-100" 
+                                onclick="categoriseer(${index}, '${suggestie.categorie}', ${JSON.stringify(suggestie.patronen).replace(/"/g, '&quot;')})">
+                            <i class="fas fa-magic me-1"></i>Categoriseren
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Voorbeelden -->
+                <div class="mt-2">
+                    <small class="text-muted">Voorbeelden:</small>
+                    <div class="mt-1">
+                        ${suggestie.matched_namen.slice(0, 3).map(m => 
+                            `<span class="badge bg-light text-dark me-1">${m.naam} (${m.aantal}x)</span>`
+                        ).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML += card;
+        
+        // Pre-selecteer aanbevolen categorie
+        if (suggestie.suggested_category_id) {
+            setTimeout(() => {
+                document.getElementById(`categorie_${index}`).value = suggestie.suggested_category_id;
+            }, 100);
+        }
+    });
+}
+
+function toonPotentiele(potentiele) {
+    const container = document.getElementById('potentieleLijst');
+    container.innerHTML = '';
+    
+    potentiele.forEach(patroon => {
+        const gemiddeldFormatted = patroon.gemiddeld_bedrag.toLocaleString('nl-NL', {
+            style: 'currency',
+            currency: 'EUR'
+        });
+        
+        const card = `
+            <div class="col-md-6 mb-3">
+                <div class="card">
+                    <div class="card-body py-2">
+                        <h6 class="card-title mb-1">${patroon.naam}</h6>
+                        <div>
+                            <span class="badge bg-info">${patroon.aantal} transacties</span>
+                            <span class="badge bg-secondary">Ø ${gemiddeldFormatted}</span>
+                        </div>
+                        <small class="text-muted">Maak hier handmatig een categorie voor</small>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML += card;
+    });
+}
+
+function categoriseer(index, categorieNaam, patronen) {
+    const categorieSelect = document.getElementById(`categorie_${index}`);
+    const categorieId = categorieSelect.value;
+    
+    if (!categorieId) {
+        alert('Selecteer eerst een categorie');
+        return;
+    }
+    
+    const categorieNaamGekozen = categorieSelect.options[categorieSelect.selectedIndex].text;
+    
+    if (!confirm(`${patronen.length} patronen toewijzen aan "${categorieNaamGekozen}"?\n\nDit kan niet ongedaan worden gemaakt.`)) {
+        return;
+    }
+    
+    // Disable button tijdens verwerking
+    const button = event.target.closest('button');
+    const originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Bezig...';
+    
+    fetch('/rapportages/auto-categoriseren', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            patronen: patronen,
+            categorie_id: parseInt(categorieId),
+            categorie_naam: categorieNaamGekozen
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.aantal_updated > 0) {
+            alert(`Succes! ${data.aantal_updated} transacties toegewezen aan "${categorieNaamGekozen}"`);
+            
+            // Herlaad de analyse
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            alert('Geen transacties bijgewerkt: ' + data.message);
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Fout bij categoriseren: ' + error.message);
+        button.disabled = false;
+        button.innerHTML = originalHtml;
+    });
+}
+</script>
+{% endblock %}

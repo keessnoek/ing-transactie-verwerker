@@ -860,6 +860,208 @@ def transactie_details():
         }
     })
 
+
+# Voeg deze routes toe aan je ing_transactieverwerker.py
+
+@app.route('/rapportages/categoriseer-analyse')
+def categoriseer_analyse():
+    """Analyseer transactienamen voor automatische categorisering"""
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # Haal alle ongecategoriseerde transacties op
+    cursor.execute('''
+        SELECT naam, COUNT(*) as aantal, 
+               AVG(bedrag) as gemiddeld_bedrag,
+               MIN(bedrag) as min_bedrag,
+               MAX(bedrag) as max_bedrag
+        FROM transacties 
+        WHERE categorie_id IS NULL 
+        GROUP BY naam 
+        ORDER BY COUNT(*) DESC
+    ''')
+    
+    naam_statistieken = cursor.fetchall()
+    
+    # Detecteer patronen voor automatische categorisering
+    categoriseer_suggesties = []
+    
+    # Supermarkten/Boodschappen patronen
+    boodschappen_patronen = [
+        'DEKAMARKT', 'ALBERT HEIJN', 'JUMBO', 'LIDL', 'ALDI', 'PLUS', 'COOP',
+        'SPAR', 'VOMAR', 'DIRK', 'PICNIC', 'BONI'
+    ]
+    
+    # Benzinestations/Auto patronen  
+    auto_patronen = [
+        'SHELL', 'BP', 'ESSO', 'TEXACO', 'TOTAL', 'TANGO', 'GULF', 'Q8',
+        'TINQ', 'FASTNED', 'ALLEGO'
+    ]
+    
+    # Restaurants/Horeca patronen
+    horeca_patronen = [
+        'MCDONALDS', 'BURGER KING', 'KFC', 'SUBWAY', 'DOMINOS', 'NEW YORK PIZZA',
+        'CAFE ', 'RESTAURANT', 'BISTRO', 'BRASSERIE'
+    ]
+    
+    # Parkeren patronen (vaak cijfers/codes)
+    parkeer_patronen = [
+        'PARKEREN', 'Q-PARK', 'APCOA', 'EUROPARKING', 'P+R'
+    ]
+    
+    # Tel matches voor elke categorie
+    def tel_matches(patronen, categorie_naam, suggested_category_id=None):
+        totaal_transacties = 0
+        totaal_bedrag = 0
+        matched_namen = []
+        
+        for naam_data in naam_statistieken:
+            naam, aantal, gem_bedrag, min_bedrag, max_bedrag = naam_data
+            
+            # Check of een van de patronen in de naam voorkomt
+            for patroon in patronen:
+                if patroon.upper() in naam.upper():
+                    totaal_transacties += aantal
+                    totaal_bedrag += gem_bedrag * aantal
+                    matched_namen.append({
+                        'naam': naam,
+                        'aantal': aantal,
+                        'gemiddeld': gem_bedrag
+                    })
+                    break  # Stop bij eerste match
+        
+        if totaal_transacties > 0:
+            categoriseer_suggesties.append({
+                'categorie': categorie_naam,
+                'suggested_category_id': suggested_category_id,
+                'patronen': patronen,
+                'totaal_transacties': totaal_transacties,
+                'totaal_bedrag': totaal_bedrag,
+                'matched_namen': matched_namen[:10],  # Top 10 voor weergave
+                'voorbeelden': patronen[:3]  # Eerste 3 patronen als voorbeeld
+            })
+    
+    # Zoek naar bestaande categorieën om te koppelen
+    cursor.execute('SELECT id, naam FROM categorien ORDER BY naam')
+    categorien = dict(cursor.fetchall())
+    
+    # Probeer categorieën te matchen
+    boodschappen_cat_id = None
+    auto_cat_id = None
+    horeca_cat_id = None
+    
+    for cat_id, cat_naam in categorien.items():
+        if 'boodschap' in cat_naam.lower() or 'supermarkt' in cat_naam.lower():
+            boodschappen_cat_id = cat_id
+        elif 'auto' in cat_naam.lower() or 'benzine' in cat_naam.lower() or 'transport' in cat_naam.lower():
+            auto_cat_id = cat_id
+        elif 'restaurant' in cat_naam.lower() or 'eten' in cat_naam.lower() or 'horeca' in cat_naam.lower():
+            horeca_cat_id = cat_id
+    
+    # Analyseer patronen
+    tel_matches(boodschappen_patronen, 'Boodschappen', boodschappen_cat_id)
+    tel_matches(auto_patronen, 'Auto/Transport', auto_cat_id)  
+    tel_matches(horeca_patronen, 'Restaurants/Eten', horeca_cat_id)
+    tel_matches(parkeer_patronen, 'Parkeren', None)
+    
+    # Zoek ook naar unieke namen met veel transacties (potentiële nieuwe patronen)
+    potentiele_patronen = []
+    for naam_data in naam_statistieken[:20]:  # Top 20 namen
+        naam, aantal, gem_bedrag, min_bedrag, max_bedrag = naam_data
+        if aantal >= 10:  # Minimaal 10 transacties
+            # Check of het niet al in een patroon zit
+            already_matched = False
+            for suggestie in categoriseer_suggesties:
+                for matched in suggestie['matched_namen']:
+                    if matched['naam'] == naam:
+                        already_matched = True
+                        break
+                if already_matched:
+                    break
+            
+            if not already_matched:
+                potentiele_patronen.append({
+                    'naam': naam,
+                    'aantal': aantal,
+                    'gemiddeld_bedrag': gem_bedrag
+                })
+    
+    # Algemene statistieken
+    cursor.execute('SELECT COUNT(*) FROM transacties WHERE categorie_id IS NULL')
+    totaal_ongecategoriseerd = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM transacties WHERE categorie_id IS NOT NULL')
+    totaal_gecategoriseerd = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return jsonify({
+        'totaal_ongecategoriseerd': totaal_ongecategoriseerd,
+        'totaal_gecategoriseerd': totaal_gecategoriseerd,
+        'categoriseer_suggesties': categoriseer_suggesties,
+        'potentiele_patronen': potentiele_patronen,
+        'bestaande_categorien': categorien
+    })
+
+
+@app.route('/rapportages/auto-categoriseren', methods=['POST'])
+def auto_categoriseren():
+    """Voer automatische categorisering uit op basis van patronen"""
+    data = request.get_json()
+    patronen = data.get('patronen', [])
+    categorie_id = data.get('categorie_id')
+    categorie_naam = data.get('categorie_naam')
+    
+    if not patronen or not categorie_id:
+        return jsonify({'error': 'Patronen en categorie_id zijn verplicht'}), 400
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # Bouw WHERE clause voor de patronen
+    where_conditions = []
+    params = []
+    
+    for patroon in patronen:
+        where_conditions.append('naam LIKE ?')
+        params.append(f'%{patroon}%')
+    
+    where_clause = ' OR '.join(where_conditions)
+    
+    # Tel eerst hoeveel transacties geraakt worden
+    count_query = f'''
+        SELECT COUNT(*) FROM transacties 
+        WHERE categorie_id IS NULL AND ({where_clause})
+    '''
+    cursor.execute(count_query, params)
+    aantal_te_updaten = cursor.fetchone()[0]
+    
+    if aantal_te_updaten == 0:
+        return jsonify({'aantal_updated': 0, 'message': 'Geen transacties gevonden voor deze patronen'})
+    
+    # Voer de update uit
+    update_query = f'''
+        UPDATE transacties 
+        SET categorie_id = ? 
+        WHERE categorie_id IS NULL AND ({where_clause})
+    '''
+    cursor.execute(update_query, [categorie_id] + params)
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'aantal_updated': aantal_te_updaten,
+        'message': f'{aantal_te_updaten} transacties toegewezen aan "{categorie_naam}"'
+    })
+
+# Voeg deze route toe aan je ing_transactieverwerker.py
+
+@app.route('/auto-categorisering')
+def auto_categorisering():
+    """Pagina voor automatische categorisering"""
+    return render_template('auto_categorisering.html')
+
 if __name__ == '__main__':
     init_database()
     app.run(debug=True)

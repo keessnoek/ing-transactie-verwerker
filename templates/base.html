@@ -56,10 +56,18 @@
                             <i class="fas fa-list me-1"></i>Transacties
                         </a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('categorien') }}">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="fas fa-tags me-1"></i>Categorieën
                         </a>
+                        <ul class="dropdown-menu" aria-labelledby="navbarDropdown">
+                            <li><a class="dropdown-item" href="{{ url_for('categorien') }}">
+                                <i class="fas fa-tags me-1"></i>Beheren
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auto_categorisering') }}">
+                                <i class="fas fa-magic me-1"></i>Auto-Categorisering
+                            </a></li>
+                        </ul>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('rapportages') }}">
