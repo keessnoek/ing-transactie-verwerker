@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from werkzeug.utils import secure_filename
 import io
+import re
 
 # Test 2
 
@@ -918,9 +919,13 @@ def categoriseer_analyse():
         for naam_data in naam_statistieken:
             naam, aantal, gem_bedrag, min_bedrag, max_bedrag = naam_data
             
-            # Check of een van de patronen in de naam voorkomt
+            # Check of een van de patronen in de naam voorkomt - NU MET WOORD-GRENZEN!
             for patroon in patronen:
-                if patroon.upper() in naam.upper():
+                # Maak regex pattern voor hele woorden
+                # \b zorgt voor woord-grenzen, re.IGNORECASE voor case-insensitive matching
+                pattern = r'\b' + re.escape(patroon) + r'\b'
+                
+                if re.search(pattern, naam, re.IGNORECASE):
                     totaal_transacties += aantal
                     totaal_bedrag += gem_bedrag * aantal
                     matched_namen.append({
@@ -940,6 +945,7 @@ def categoriseer_analyse():
                 'matched_namen': matched_namen[:10],  # Top 10 voor weergave
                 'voorbeelden': patronen[:3]  # Eerste 3 patronen als voorbeeld
             })
+
     
     # Zoek naar bestaande categorieën om te koppelen
     cursor.execute('SELECT id, naam FROM categorien ORDER BY naam')
@@ -1006,7 +1012,7 @@ def categoriseer_analyse():
 
 @app.route('/rapportages/auto-categoriseren', methods=['POST'])
 def auto_categoriseren():
-    """Voer automatische categorisering uit op basis van patronen"""
+    """Voer automatische categorisering uit op basis van patronen - NU MET PYTHON REGEX"""
     data = request.get_json()
     patronen = data.get('patronen', [])
     categorie_id = data.get('categorie_id')
@@ -1018,34 +1024,37 @@ def auto_categoriseren():
     conn = sqlite3.connect('transacties.db')
     cursor = conn.cursor()
     
-    # Bouw WHERE clause voor de patronen
-    where_conditions = []
-    params = []
+    # Haal ALLE ongecategoriseerde transacties op en filter in Python
+    cursor.execute('''
+        SELECT id, naam FROM transacties 
+        WHERE categorie_id IS NULL
+    ''')
     
-    for patroon in patronen:
-        where_conditions.append('naam LIKE ?')
-        params.append(f'%{patroon}%')
+    alle_transacties = cursor.fetchall()
+    te_updaten_ids = []
     
-    where_clause = ' OR '.join(where_conditions)
+    # Filter transacties met Python regex (veel betrouwbaarder!)
+    for transactie_id, naam in alle_transacties:
+        for patroon in patronen:
+            # Regex pattern voor hele woorden, case-insensitive
+            pattern = r'\b' + re.escape(patroon) + r'\b'
+            if re.search(pattern, naam, re.IGNORECASE):
+                te_updaten_ids.append(transactie_id)
+                break  # Stop bij eerste match
     
-    # Tel eerst hoeveel transacties geraakt worden
-    count_query = f'''
-        SELECT COUNT(*) FROM transacties 
-        WHERE categorie_id IS NULL AND ({where_clause})
-    '''
-    cursor.execute(count_query, params)
-    aantal_te_updaten = cursor.fetchone()[0]
+    aantal_te_updaten = len(te_updaten_ids)
     
     if aantal_te_updaten == 0:
         return jsonify({'aantal_updated': 0, 'message': 'Geen transacties gevonden voor deze patronen'})
     
-    # Voer de update uit
+    # Update de gevonden transacties
+    placeholders = ','.join('?' * len(te_updaten_ids))
     update_query = f'''
         UPDATE transacties 
         SET categorie_id = ? 
-        WHERE categorie_id IS NULL AND ({where_clause})
+        WHERE id IN ({placeholders})
     '''
-    cursor.execute(update_query, [categorie_id] + params)
+    cursor.execute(update_query, [categorie_id] + te_updaten_ids)
     
     conn.commit()
     conn.close()
@@ -1054,8 +1063,6 @@ def auto_categoriseren():
         'aantal_updated': aantal_te_updaten,
         'message': f'{aantal_te_updaten} transacties toegewezen aan "{categorie_naam}"'
     })
-
-# Voeg deze route toe aan je ing_transactieverwerker.py
 
 @app.route('/auto-categorisering')
 def auto_categorisering():
