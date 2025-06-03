@@ -6,13 +6,21 @@
 <div class="row">
     <div class="col-12">
         <h2><i class="fas fa-list me-2"></i>Transacties</h2>
-        <p class="text-muted">Overzicht van al je geïmporteerde transacties.</p>
+        <p class="text-muted">Overzicht van al je geïmporteerde transacties. <span class="badge bg-info">Klik op kolommen om te sorteren!</span></p>
     </div>
 </div>
 
 <div class="row mb-3">
     <div class="col-md-6">
         <form method="GET" action="{{ url_for('transacties') }}">
+            <!-- Behoud huidige sort parameters -->
+            {% if current_sort %}
+            <input type="hidden" name="sort" value="{{ current_sort }}">
+            {% endif %}
+            {% if current_order %}
+            <input type="hidden" name="order" value="{{ current_order }}">
+            {% endif %}
+            
             <div class="input-group">
                 <span class="input-group-text"><i class="fas fa-search"></i></span>
                 <input type="text" class="form-control" name="zoek" 
@@ -20,7 +28,7 @@
                        placeholder="Zoeken in transacties...">
                 <button class="btn btn-primary" type="submit">Zoek</button>
                 {% if zoekterm %}
-                <a href="{{ url_for('transacties') }}" class="btn btn-outline-secondary">Wissen</a>
+                <a href="{{ url_for('transacties', sort=current_sort, order=current_order) }}" class="btn btn-outline-secondary">Wissen</a>
                 {% endif %}
             </div>
         </form>
@@ -52,6 +60,26 @@
 </div>
 {% endif %}
 
+<!-- Sort info -->
+{% if current_sort %}
+<div class="row mb-2">
+    <div class="col-12">
+        <small class="text-muted">
+            <i class="fas fa-sort me-1"></i>
+            Gesorteerd op: <strong>
+            {% if current_sort == 'datum' %}Datum
+            {% elif current_sort == 'naam' %}Naam
+            {% elif current_sort == 'bedrag' %}Bedrag
+            {% elif current_sort == 'code' %}Code
+            {% elif current_sort == 'categorie' %}Categorie
+            {% endif %}
+            </strong>
+            ({{ 'Oplopend' if current_order == 'asc' else 'Aflopend' }})
+        </small>
+    </div>
+</div>
+{% endif %}
+
 <div class="row">
     <div class="col-12">
         <div class="card">
@@ -60,14 +88,69 @@
                     <table class="table table-hover mb-0" id="transactiesTable">
                         <thead class="table-light sticky-top">
                             <tr>
-                                <th>Datum</th>
-                                <th>Naam</th>
-                                <th>Bedrag</th>
-                                <th>Code</th>
+                                <th class="sortable-header" data-column="datum">
+                                    Datum
+                                    {% if current_sort == 'datum' %}
+                                        {% if current_order == 'asc' %}
+                                            <i class="fas fa-sort-up text-primary"></i>
+                                        {% else %}
+                                            <i class="fas fa-sort-down text-primary"></i>
+                                        {% endif %}
+                                    {% else %}
+                                        <i class="fas fa-sort text-muted"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="sortable-header" data-column="naam">
+                                    Naam
+                                    {% if current_sort == 'naam' %}
+                                        {% if current_order == 'asc' %}
+                                            <i class="fas fa-sort-up text-primary"></i>
+                                        {% else %}
+                                            <i class="fas fa-sort-down text-primary"></i>
+                                        {% endif %}
+                                    {% else %}
+                                        <i class="fas fa-sort text-muted"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="sortable-header" data-column="bedrag">
+                                    Bedrag
+                                    {% if current_sort == 'bedrag' %}
+                                        {% if current_order == 'asc' %}
+                                            <i class="fas fa-sort-up text-primary"></i>
+                                        {% else %}
+                                            <i class="fas fa-sort-down text-primary"></i>
+                                        {% endif %}
+                                    {% else %}
+                                        <i class="fas fa-sort text-muted"></i>
+                                    {% endif %}
+                                </th>
+                                <th class="sortable-header" data-column="code">
+                                    Code
+                                    {% if current_sort == 'code' %}
+                                        {% if current_order == 'asc' %}
+                                            <i class="fas fa-sort-up text-primary"></i>
+                                        {% else %}
+                                            <i class="fas fa-sort-down text-primary"></i>
+                                        {% endif %}
+                                    {% else %}
+                                        <i class="fas fa-sort text-muted"></i>
+                                    {% endif %}
+                                </th>
                                 <th class="tegenrekening-col">Tegenrekening</th>
                                 <th class="mededelingen-col">Mededelingen</th>
                                 <th>Saldo</th>
-                                <th>Categorie</th>
+                                <th class="sortable-header" data-column="categorie">
+                                    Categorie
+                                    {% if current_sort == 'categorie' %}
+                                        {% if current_order == 'asc' %}
+                                            <i class="fas fa-sort-up text-primary"></i>
+                                        {% else %}
+                                            <i class="fas fa-sort-down text-primary"></i>
+                                        {% endif %}
+                                    {% else %}
+                                        <i class="fas fa-sort text-muted"></i>
+                                    {% endif %}
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
@@ -147,7 +230,7 @@
 
 {% block scripts %}
 <script>
-// Toggle kolommen
+// Toggle kolommen (bestaande functie)
 function toggleColumn(columnClass) {
     const columns = document.querySelectorAll('.' + columnClass + '-col');
     const isHidden = columns[0].style.display === 'none';
@@ -166,7 +249,7 @@ function toggleColumn(columnClass) {
     }
 }
 
-// Update categorie via AJAX
+// Update categorie via AJAX (bestaande functie)
 function updateCategorie(selectElement) {
     const transactieId = selectElement.getAttribute('data-transactie-id');
     const categorieId = selectElement.value;
@@ -205,5 +288,55 @@ function updateCategorie(selectElement) {
         loadingIndicator.classList.add('d-none');
     });
 }
+
+// NIEUWE FUNCTIE: Sorteer functionaliteit
+document.addEventListener('DOMContentLoaded', function() {
+    const sortableHeaders = document.querySelectorAll('.sortable-header');
+    
+    sortableHeaders.forEach(header => {
+        header.style.cursor = 'pointer';
+        header.addEventListener('click', function() {
+            const column = this.getAttribute('data-column');
+            const currentSort = '{{ current_sort }}';
+            const currentOrder = '{{ current_order }}';
+            
+            // Bepaal nieuwe sort order
+            let newOrder = 'desc'; // Default
+            if (column === currentSort) {
+                // Toggle tussen asc/desc voor huidige kolom
+                newOrder = currentOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                // Voor nieuwe kolom: gebruik logische default
+                if (column === 'naam' || column === 'code' || column === 'categorie') {
+                    newOrder = 'asc'; // Alfabetisch
+                } else {
+                    newOrder = 'desc'; // Numeriek/datum: hoogste/nieuwste eerst
+                }
+            }
+            
+            // Bouw nieuwe URL met behoud van zoekterm
+            const urlParams = new URLSearchParams(window.location.search);
+            urlParams.set('sort', column);
+            urlParams.set('order', newOrder);
+            
+            // Navigeer naar nieuwe URL
+            window.location.href = window.location.pathname + '?' + urlParams.toString();
+        });
+    });
+});
 </script>
+
+<style>
+.sortable-header {
+    user-select: none;
+}
+
+.sortable-header:hover {
+    background-color: #e9ecef !important;
+}
+
+.sortable-header i {
+    margin-left: 5px;
+}
+</style>
 {% endblock %}

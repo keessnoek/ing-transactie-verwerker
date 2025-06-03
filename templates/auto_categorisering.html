@@ -1,5 +1,3 @@
-<!-- Voeg deze pagina toe als auto_categorisering.html in je templates folder -->
-
 {% extends "base.html" %}
 
 {% block title %}Automatische Categorisering - ING Transactie Verwerker{% endblock %}
@@ -44,7 +42,7 @@
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fas fa-lightbulb me-2"></i>Automatische Categoriseer-Suggesties</h5>
-                <small class="text-muted">Klik op "Categoriseren" om de regels toe te passen</small>
+                <small class="text-muted">Klik op "Bekijk Alle" om te controleren, daarna "Categoriseren" om toe te passen</small>
             </div>
             <div class="card-body p-0">
                 <div id="suggestiesLijst">
@@ -85,12 +83,90 @@
         </div>
     </div>
 </div>
+
+<!-- Transactie Preview Modal -->
+<div class="modal fade" id="transactiePreviewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="previewModalTitle">
+                    <i class="fas fa-list me-2"></i>Transacties Preview
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Loading indicator voor modal -->
+                <div id="previewLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Transacties laden...</p>
+                </div>
+                
+                <!-- Controles -->
+                <div id="previewControls" class="row mb-3 d-none">
+                    <div class="col-md-8">
+                        <div class="alert alert-info mb-0">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <span id="previewAantal">0</span> transacties gevonden. Deselecteer items die niet horen bij deze categorie.
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-sm btn-outline-primary me-2" onclick="selectAllPreview()">Alles selecteren</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="selectNonePreview()">Niets selecteren</button>
+                    </div>
+                </div>
+                
+                <!-- Transacties tabel -->
+                <div id="previewTransacties" class="d-none">
+                    <div class="table-responsive" style="max-height: 400px;">
+                        <table class="table table-sm table-hover">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th width="50">
+                                        <input type="checkbox" id="selectAllPreviewCheckbox" onchange="toggleAllPreview()">
+                                    </th>
+                                    <th>Datum</th>
+                                    <th>Naam</th>
+                                    <th>Bedrag</th>
+                                    <th>Code</th>
+                                </tr>
+                            </thead>
+                            <tbody id="previewTransactiesBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Geen data -->
+                <div id="previewGeenData" class="text-center py-5 d-none">
+                    <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                    <h6 class="text-muted">Geen transacties gevonden</h6>
+                    <p class="text-muted">Er zijn geen transacties gevonden voor deze patronen.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuleren</button>
+                <button type="button" class="btn btn-success" id="categoriseerGeselecteerd" onclick="categoriseerGeselecteerdUitModal()">
+                    <i class="fas fa-magic me-1"></i>Categoriseer Geselecteerde
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+let huidigeModalData = null;
+
 document.addEventListener('DOMContentLoaded', function() {
     laadAnalyse();
+    
+    // Event listeners voor checkboxes
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('preview-checkbox')) {
+            updatePreviewButton();
+        }
+    });
 });
 
 function laadAnalyse() {
@@ -163,13 +239,17 @@ function toonSuggesties(suggesties, categorien) {
                             <span class="badge bg-success">${bedragFormatted}</span>
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <select class="form-select form-select-sm" id="categorie_${index}">
                             <option value="">Kies categorie...</option>
                             ${categorieOpties}
                         </select>
                     </div>
-                    <div class="col-md-2">
+                    <div class="col-md-3">
+                        <button class="btn btn-info btn-sm w-100 me-1 mb-1" 
+                                onclick="bekijkTransacties(${index}, '${suggestie.categorie}', ${JSON.stringify(suggestie.patronen).replace(/"/g, '&quot;')})">
+                            <i class="fas fa-eye me-1"></i>Bekijk Alle
+                        </button>
                         <button class="btn btn-success btn-sm w-100" 
                                 onclick="categoriseer(${index}, '${suggestie.categorie}', ${JSON.stringify(suggestie.patronen).replace(/"/g, '&quot;')})">
                             <i class="fas fa-magic me-1"></i>Categoriseren
@@ -226,6 +306,178 @@ function toonPotentiele(potentiele) {
         `;
         
         container.innerHTML += card;
+    });
+}
+
+function bekijkTransacties(index, categorieNaam, patronen) {
+    // Sla gegevens op voor later gebruik
+    huidigeModalData = {
+        index: index,
+        categorieNaam: categorieNaam,
+        patronen: patronen
+    };
+    
+    // Modal openen
+    const modal = new bootstrap.Modal(document.getElementById('transactiePreviewModal'));
+    document.getElementById('previewModalTitle').innerHTML = 
+        `<i class="fas fa-list me-2"></i>Preview: ${categorieNaam}`;
+    
+    // Reset modal content
+    document.getElementById('previewLoading').classList.remove('d-none');
+    document.getElementById('previewControls').classList.add('d-none');
+    document.getElementById('previewTransacties').classList.add('d-none');
+    document.getElementById('previewGeenData').classList.add('d-none');
+    
+    modal.show();
+    
+    // Fetch transactie data
+    fetch('/rapportages/preview-transacties', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            patronen: patronen
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('previewLoading').classList.add('d-none');
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        if (data.transacties.length === 0) {
+            document.getElementById('previewGeenData').classList.remove('d-none');
+            return;
+        }
+        
+        // Update aantal
+        document.getElementById('previewAantal').textContent = data.aantal;
+        document.getElementById('previewControls').classList.remove('d-none');
+        
+        // Vul transacties tabel
+        const tbody = document.getElementById('previewTransactiesBody');
+        tbody.innerHTML = '';
+        
+        data.transacties.forEach(transactie => {
+            const row = tbody.insertRow();
+            row.innerHTML = `
+                <td>
+                    <input type="checkbox" class="preview-checkbox" value="${transactie.id}" checked>
+                </td>
+                <td><small>${transactie.datum}</small></td>
+                <td title="${transactie.naam}">${transactie.naam.length > 50 ? transactie.naam.substring(0, 47) + '...' : transactie.naam}</td>
+                <td class="${transactie.bedrag >= 0 ? 'transaction-positive' : 'transaction-negative'}">
+                    ${transactie.bedrag_formatted}
+                </td>
+                <td><span class="badge bg-secondary">${transactie.code}</span></td>
+            `;
+        });
+        
+        document.getElementById('previewTransacties').classList.remove('d-none');
+        
+        // Update button
+        updatePreviewButton();
+    })
+    .catch(error => {
+        document.getElementById('previewLoading').classList.add('d-none');
+        console.error('Error:', error);
+        document.getElementById('previewGeenData').classList.remove('d-none');
+    });
+}
+
+function selectAllPreview() {
+    document.querySelectorAll('.preview-checkbox').forEach(cb => cb.checked = true);
+    document.getElementById('selectAllPreviewCheckbox').checked = true;
+    updatePreviewButton();
+}
+
+function selectNonePreview() {
+    document.querySelectorAll('.preview-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('selectAllPreviewCheckbox').checked = false;
+    updatePreviewButton();
+}
+
+function toggleAllPreview() {
+    const isChecked = document.getElementById('selectAllPreviewCheckbox').checked;
+    document.querySelectorAll('.preview-checkbox').forEach(cb => cb.checked = isChecked);
+    updatePreviewButton();
+}
+
+function updatePreviewButton() {
+    const checked = document.querySelectorAll('.preview-checkbox:checked').length;
+    const button = document.getElementById('categoriseerGeselecteerd');
+    
+    button.disabled = checked === 0;
+    button.innerHTML = checked > 0 
+        ? `<i class="fas fa-magic me-1"></i>Categoriseer ${checked} Geselecteerde`
+        : `<i class="fas fa-magic me-1"></i>Categoriseer Geselecteerde`;
+}
+
+function categoriseerGeselecteerdUitModal() {
+    if (!huidigeModalData) return;
+    
+    const categorieSelect = document.getElementById(`categorie_${huidigeModalData.index}`);
+    const categorieId = categorieSelect.value;
+    
+    if (!categorieId) {
+        alert('Selecteer eerst een categorie');
+        return;
+    }
+    
+    const categorieNaamGekozen = categorieSelect.options[categorieSelect.selectedIndex].text;
+    const geselecteerdeIds = Array.from(document.querySelectorAll('.preview-checkbox:checked')).map(cb => parseInt(cb.value));
+    
+    if (geselecteerdeIds.length === 0) {
+        alert('Selecteer minimaal één transactie');
+        return;
+    }
+    
+    if (!confirm(`${geselecteerdeIds.length} transacties toewijzen aan "${categorieNaamGekozen}"?`)) {
+        return;
+    }
+    
+    // Sluit modal
+    bootstrap.Modal.getInstance(document.getElementById('transactiePreviewModal')).hide();
+    
+    // Disable button tijdens verwerking
+    const button = document.querySelector(`button[onclick*="categoriseer(${huidigeModalData.index}"]`);
+    const originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Bezig...';
+    
+    fetch('/rapportages/auto-categoriseren', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            patronen: huidigeModalData.patronen,
+            categorie_id: parseInt(categorieId),
+            categorie_naam: categorieNaamGekozen,
+            transactie_ids: geselecteerdeIds
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.aantal_updated > 0) {
+            alert(`Succes! ${data.aantal_updated} transacties toegewezen aan "${categorieNaamGekozen}"`);
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            alert('Geen transacties bijgewerkt: ' + data.message);
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Fout bij categoriseren: ' + error.message);
+        button.disabled = false;
+        button.innerHTML = originalHtml;
     });
 }
 

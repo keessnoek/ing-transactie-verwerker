@@ -215,16 +215,37 @@ def importeren():
     return render_template('importeren.html', laatste_datum=laatste_datum)
 # Vervang de /transacties route in je ing_transactieverwerker.py met deze versie:
 
+# Vervang je huidige /transacties route in ing_transactieverwerker.py met deze versie:
+
 @app.route('/transacties')
 def transacties():
-    """Toon alle transacties in een tabel met categorieën - nu met backend zoeken"""
+    """Toon alle transacties in een tabel met categorieën - nu met server-side sorting en zoeken"""
     conn = sqlite3.connect('transacties.db')
     cursor = conn.cursor()
     
-    # Haal zoekterm op uit URL parameters
+    # Haal parameters op uit URL
     zoekterm = request.args.get('zoek', '').strip()
+    sort_column = request.args.get('sort', 'datum')  # Default: datum
+    sort_order = request.args.get('order', 'desc')   # Default: desc (nieuwste eerst)
     
-    # Bouw SQL query met optionele WHERE clause
+    # Valideer sort parameters voor security
+    valid_columns = {
+        'datum': 't.datum',
+        'naam': 't.naam', 
+        'bedrag': 't.bedrag',
+        'code': 't.code',
+        'categorie': 'c.naam'
+    }
+    
+    valid_orders = ['asc', 'desc']
+    
+    # Gebruik defaults als parameters invalid zijn
+    if sort_column not in valid_columns:
+        sort_column = 'datum'
+    if sort_order not in valid_orders:
+        sort_order = 'desc'
+    
+    # Bouw SQL query
     base_query = '''
         SELECT t.id, t.datum, t.naam, t.bedrag, t.code, t.mededelingen, 
                t.tegenrekening, t.saldo_na_mutatie, c.naam as categorie_naam, c.id as categorie_id
@@ -232,8 +253,9 @@ def transacties():
         LEFT JOIN categorien c ON t.categorie_id = c.id
     '''
     
+    # WHERE clause voor zoeken
+    params = []
     if zoekterm:
-        # Zoek in alle relevante velden
         where_clause = '''
             WHERE (t.datum LIKE ? OR 
                    t.naam LIKE ? OR 
@@ -243,27 +265,39 @@ def transacties():
                    t.tegenrekening LIKE ? OR
                    c.naam LIKE ?)
         '''
-        
-        # Voeg wildcards toe aan zoekterm
         search_pattern = f'%{zoekterm}%'
-        search_params = [search_pattern] * 7  # Voor elke LIKE clause
-        
-        full_query = base_query + where_clause + ' ORDER BY t.datum DESC, t.id DESC LIMIT 1000'
-        cursor.execute(full_query, search_params)
-    else:
-        # Geen zoekterm - toon gewoon de laatste 1000
-        full_query = base_query + ' ORDER BY t.datum DESC, t.id DESC LIMIT 1000'
-        cursor.execute(full_query)
+        params = [search_pattern] * 7
+        base_query += where_clause
     
+    # ORDER BY clause
+    sql_column = valid_columns[sort_column]
+    
+    # Speciale behandeling voor categorie (NULL values onderaan)
+    if sort_column == 'categorie':
+        if sort_order == 'asc':
+            order_clause = f' ORDER BY {sql_column} IS NULL, {sql_column} ASC, t.datum DESC'
+        else:
+            order_clause = f' ORDER BY {sql_column} IS NULL, {sql_column} DESC, t.datum DESC'
+    else:
+        # Voor andere kolommen: secundaire sort op datum (nieuwste eerst)
+        if sort_column == 'datum':
+            order_clause = f' ORDER BY {sql_column} {sort_order.upper()}, t.id {sort_order.upper()}'
+        else:
+            order_clause = f' ORDER BY {sql_column} {sort_order.upper()}, t.datum DESC'
+    
+    # Volledige query met limit
+    full_query = base_query + order_clause + ' LIMIT 1000'
+    
+    cursor.execute(full_query, params)
     transacties_data = cursor.fetchall()
     
-    # Haal alle beschikbare categorieën op voor de dropdown
+    # Haal alle categorieën op voor dropdown
     cursor.execute('SELECT id, naam FROM categorien ORDER BY naam')
     alle_categorien = cursor.fetchall()
     
-    # Tel totaal aantal resultaten voor de melding
+    # Tel totaal aantal resultaten
     if zoekterm:
-        cursor.execute('''
+        count_query = '''
             SELECT COUNT(*) FROM transacties t
             LEFT JOIN categorien c ON t.categorie_id = c.id
             WHERE (t.datum LIKE ? OR 
@@ -273,11 +307,12 @@ def transacties():
                    t.mededelingen LIKE ? OR 
                    t.tegenrekening LIKE ? OR
                    c.naam LIKE ?)
-        ''', search_params)
-        totaal_resultaten = cursor.fetchone()[0]
+        '''
+        cursor.execute(count_query, params)
     else:
         cursor.execute('SELECT COUNT(*) FROM transacties')
-        totaal_resultaten = cursor.fetchone()[0]
+    
+    totaal_resultaten = cursor.fetchone()[0]
     
     conn.close()
     
@@ -286,7 +321,9 @@ def transacties():
                          alle_categorien=alle_categorien,
                          zoekterm=zoekterm,
                          totaal_resultaten=totaal_resultaten,
-                         getoond_resultaten=len(transacties_data))
+                         getoond_resultaten=len(transacties_data),
+                         current_sort=sort_column,
+                         current_order=sort_order)
 
 
 @app.route('/categorien')
@@ -511,7 +548,7 @@ def bulk_winkel_toewijzen():
 
 @app.route('/categorien/suggesties/<int:categorie_id>')
 def categorie_suggesties(categorie_id):
-    """Vind transacties die lijken op deze categorie voor bulk-toewijzing"""
+    """Vind transacties die lijken op deze categorie voor bulk-toewijzing - NU MET GEFIXTE PATTERN MATCHING"""
     conn = sqlite3.connect('transacties.db')
     cursor = conn.cursor()
     
@@ -538,21 +575,43 @@ def categorie_suggesties(categorie_id):
     winkel_patronen = {}  # Voor bulk-opties
     
     if bestaande_namen:
-        placeholders = ','.join('?' * len(bestaande_namen))
-        cursor.execute(f'''
+        # Haal ALLE ongecategoriseerde transacties op en filter met Python regex
+        cursor.execute('''
             SELECT DISTINCT t.id, t.datum, t.naam, t.bedrag
             FROM transacties t
             WHERE t.categorie_id IS NULL 
-            AND (t.naam IN ({placeholders}) OR {' OR '.join(['t.naam LIKE ?' for _ in bestaande_namen])})
             ORDER BY t.datum DESC
-            LIMIT 50
-        ''', bestaande_namen + [f'%{naam.split()[0]}%' for naam in bestaande_namen])
+        ''')
         
-        suggesties = cursor.fetchall()
+        alle_ongecategoriseerd = cursor.fetchall()
         
-        # Detecteer winkel-patronen voor bulk-opties
+        # Filter met Python regex voor exacte matches
+        for transactie_id, datum, naam, bedrag in alle_ongecategoriseerd:
+            matched = False
+            
+            # Check exacte matches
+            for bestaande_naam in bestaande_namen:
+                if naam == bestaande_naam:
+                    suggesties.append((transactie_id, datum, naam, bedrag))
+                    matched = True
+                    break
+            
+            # Check partial matches met hele woorden
+            if not matched:
+                for bestaande_naam in bestaande_namen:
+                    # Probeer eerste woord van bestaande naam als pattern
+                    eerste_woord = bestaande_naam.split()[0] if bestaande_naam.split() else bestaande_naam
+                    if len(eerste_woord) > 3:  # Alleen als het woord lang genoeg is
+                        pattern = r'\b' + re.escape(eerste_woord) + r'\b'
+                        if re.search(pattern, naam, re.IGNORECASE):
+                            suggesties.append((transactie_id, datum, naam, bedrag))
+                            break
+        
+        # Limiteer suggesties tot 50
+        suggesties = suggesties[:50]
+        
+        # Detecteer winkel-patronen voor bulk-opties - NU OOK MET REGEX
         for naam in bestaande_namen:
-            # Probeer winkelnaam te extraheren (eerste woord vaak, of bekende patronen)
             winkel_kandidaten = []
             
             # Bekende supermarkt patronen
@@ -574,15 +633,19 @@ def categorie_suggesties(categorie_id):
                 if len(eerste_woord) > 3:  # Alleen als het woord lang genoeg is
                     winkel_kandidaten.append(eerste_woord)
             
-            # Tel hoeveel ongecategoriseerde transacties er zijn per winkel
+            # Tel hoeveel ongecategoriseerde transacties er zijn per winkel - NU MET REGEX
             for winkel in winkel_kandidaten:
                 if winkel not in winkel_patronen:
+                    # Haal alle ongecategoriseerde transacties op en filter met Python
                     cursor.execute('''
-                        SELECT COUNT(*) FROM transacties 
-                        WHERE categorie_id IS NULL 
-                        AND (naam LIKE ? OR naam LIKE ?)
-                    ''', (f'%{winkel}%', f'{winkel.upper()}%'))
-                    aantal = cursor.fetchone()[0]
+                        SELECT naam FROM transacties 
+                        WHERE categorie_id IS NULL
+                    ''')
+                    alle_namen = [row[0] for row in cursor.fetchall()]
+                    
+                    # Tel matches met regex
+                    pattern = r'\b' + re.escape(winkel) + r'\b'
+                    aantal = sum(1 for n in alle_namen if re.search(pattern, n, re.IGNORECASE))
                     
                     if aantal >= 5:  # Alleen tonen als er minstens 5 transacties zijn
                         winkel_patronen[winkel] = aantal
@@ -594,7 +657,6 @@ def categorie_suggesties(categorie_id):
                          categorie_id=categorie_id,
                          suggesties=suggesties,
                          winkel_patronen=winkel_patronen)
-
 
 # Voeg deze routes toe aan je ing_transactieverwerker.py
 
@@ -866,7 +928,7 @@ def transactie_details():
 
 @app.route('/rapportages/categoriseer-analyse')
 def categoriseer_analyse():
-    """Analyseer transactienamen voor automatische categorisering"""
+    """Analyseer transactienamen voor automatische categorisering - NU MET JUISTE PATTERN MATCHING"""
     conn = sqlite3.connect('transacties.db')
     cursor = conn.cursor()
     
@@ -905,12 +967,12 @@ def categoriseer_analyse():
         'CAFE ', 'RESTAURANT', 'BISTRO', 'BRASSERIE'
     ]
     
-    # Parkeren patronen (vaak cijfers/codes)
+    # Parkeren patronen
     parkeer_patronen = [
         'PARKEREN', 'Q-PARK', 'APCOA', 'EUROPARKING', 'P+R'
     ]
     
-    # Tel matches voor elke categorie
+    # GEFIXTE tel_matches functie met Python regex
     def tel_matches(patronen, categorie_naam, suggested_category_id=None):
         totaal_transacties = 0
         totaal_bedrag = 0
@@ -919,10 +981,9 @@ def categoriseer_analyse():
         for naam_data in naam_statistieken:
             naam, aantal, gem_bedrag, min_bedrag, max_bedrag = naam_data
             
-            # Check of een van de patronen in de naam voorkomt - NU MET WOORD-GRENZEN!
+            # Check of een van de patronen in de naam voorkomt - NU MET PYTHON REGEX!
             for patroon in patronen:
-                # Maak regex pattern voor hele woorden
-                # \b zorgt voor woord-grenzen, re.IGNORECASE voor case-insensitive matching
+                # Regex pattern voor hele woorden, case-insensitive
                 pattern = r'\b' + re.escape(patroon) + r'\b'
                 
                 if re.search(pattern, naam, re.IGNORECASE):
@@ -945,7 +1006,6 @@ def categoriseer_analyse():
                 'matched_namen': matched_namen[:10],  # Top 10 voor weergave
                 'voorbeelden': patronen[:3]  # Eerste 3 patronen als voorbeeld
             })
-
     
     # Zoek naar bestaande categorieën om te koppelen
     cursor.execute('SELECT id, naam FROM categorien ORDER BY naam')
@@ -964,7 +1024,7 @@ def categoriseer_analyse():
         elif 'restaurant' in cat_naam.lower() or 'eten' in cat_naam.lower() or 'horeca' in cat_naam.lower():
             horeca_cat_id = cat_id
     
-    # Analyseer patronen
+    # Analyseer patronen - NU MET GEFIXTE FUNCTIE
     tel_matches(boodschappen_patronen, 'Boodschappen', boodschappen_cat_id)
     tel_matches(auto_patronen, 'Auto/Transport', auto_cat_id)  
     tel_matches(horeca_patronen, 'Restaurants/Eten', horeca_cat_id)
@@ -1010,13 +1070,15 @@ def categoriseer_analyse():
     })
 
 
+
 @app.route('/rapportages/auto-categoriseren', methods=['POST'])
 def auto_categoriseren():
-    """Voer automatische categorisering uit op basis van patronen - NU MET PYTHON REGEX"""
+    """Voer automatische categorisering uit - NU MET OPTIONELE TRANSACTIE-IDS"""
     data = request.get_json()
     patronen = data.get('patronen', [])
     categorie_id = data.get('categorie_id')
     categorie_naam = data.get('categorie_naam')
+    transactie_ids = data.get('transactie_ids', None)  # Optioneel: specifieke IDs
     
     if not patronen or not categorie_id:
         return jsonify({'error': 'Patronen en categorie_id zijn verplicht'}), 400
@@ -1024,37 +1086,45 @@ def auto_categoriseren():
     conn = sqlite3.connect('transacties.db')
     cursor = conn.cursor()
     
-    # Haal ALLE ongecategoriseerde transacties op en filter in Python
-    cursor.execute('''
-        SELECT id, naam FROM transacties 
-        WHERE categorie_id IS NULL
-    ''')
-    
-    alle_transacties = cursor.fetchall()
-    te_updaten_ids = []
-    
-    # Filter transacties met Python regex (veel betrouwbaarder!)
-    for transactie_id, naam in alle_transacties:
-        for patroon in patronen:
-            # Regex pattern voor hele woorden, case-insensitive
-            pattern = r'\b' + re.escape(patroon) + r'\b'
-            if re.search(pattern, naam, re.IGNORECASE):
-                te_updaten_ids.append(transactie_id)
-                break  # Stop bij eerste match
-    
-    aantal_te_updaten = len(te_updaten_ids)
-    
-    if aantal_te_updaten == 0:
-        return jsonify({'aantal_updated': 0, 'message': 'Geen transacties gevonden voor deze patronen'})
-    
-    # Update de gevonden transacties
-    placeholders = ','.join('?' * len(te_updaten_ids))
-    update_query = f'''
-        UPDATE transacties 
-        SET categorie_id = ? 
-        WHERE id IN ({placeholders})
-    '''
-    cursor.execute(update_query, [categorie_id] + te_updaten_ids)
+    if transactie_ids:
+        # Gebruik alleen de geselecteerde transactie IDs
+        placeholders = ','.join('?' * len(transactie_ids))
+        update_query = f'''
+            UPDATE transacties 
+            SET categorie_id = ? 
+            WHERE id IN ({placeholders}) AND categorie_id IS NULL
+        '''
+        cursor.execute(update_query, [categorie_id] + transactie_ids)
+        aantal_te_updaten = cursor.rowcount
+        
+    else:
+        # Oude manier: alle transacties die matchen met patronen
+        cursor.execute('''
+            SELECT id, naam FROM transacties 
+            WHERE categorie_id IS NULL
+        ''')
+        
+        alle_transacties = cursor.fetchall()
+        te_updaten_ids = []
+        
+        # Filter transacties met Python regex
+        for transactie_id, naam in alle_transacties:
+            for patroon in patronen:
+                pattern = r'\b' + re.escape(patroon) + r'\b'
+                if re.search(pattern, naam, re.IGNORECASE):
+                    te_updaten_ids.append(transactie_id)
+                    break
+        
+        aantal_te_updaten = len(te_updaten_ids)
+        
+        if aantal_te_updaten > 0:
+            placeholders = ','.join('?' * len(te_updaten_ids))
+            update_query = f'''
+                UPDATE transacties 
+                SET categorie_id = ? 
+                WHERE id IN ({placeholders})
+            '''
+            cursor.execute(update_query, [categorie_id] + te_updaten_ids)
     
     conn.commit()
     conn.close()
@@ -1068,6 +1138,60 @@ def auto_categoriseren():
 def auto_categorisering():
     """Pagina voor automatische categorisering"""
     return render_template('auto_categorisering.html')
+
+
+@app.route('/rapportages/preview-transacties', methods=['POST'])
+def preview_transacties():
+    """Haal alle transacties op voor een specifieke patroon-set (voor preview modal)"""
+    data = request.get_json()
+    patronen = data.get('patronen', [])
+    
+    if not patronen:
+        return jsonify({'error': 'Patronen zijn verplicht'}), 400
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # Haal ALLE ongecategoriseerde transacties op
+    cursor.execute('''
+        SELECT id, datum, naam, bedrag, code, mededelingen
+        FROM transacties 
+        WHERE categorie_id IS NULL
+        ORDER BY datum DESC
+    ''')
+    
+    alle_transacties = cursor.fetchall()
+    matched_transacties = []
+    
+    # Filter transacties met Python regex
+    for transactie_data in alle_transacties:
+        transactie_id, datum, naam, bedrag, code, mededelingen = transactie_data
+        
+        for patroon in patronen:
+            # Regex pattern voor hele woorden, case-insensitive
+            pattern = r'\b' + re.escape(patroon) + r'\b'
+            if re.search(pattern, naam, re.IGNORECASE):
+                matched_transacties.append({
+                    'id': transactie_id,
+                    'datum': datum,
+                    'naam': naam,
+                    'bedrag': bedrag,
+                    'bedrag_formatted': f"€{abs(bedrag):.2f}" if bedrag >= 0 else f"-€{abs(bedrag):.2f}",
+                    'code': code,
+                    'mededelingen': mededelingen or ''
+                })
+                break  # Stop bij eerste match
+    
+    conn.close()
+    
+    # Sorteer op datum (nieuwste eerst)
+    matched_transacties.sort(key=lambda x: x['datum'], reverse=True)
+    
+    return jsonify({
+        'transacties': matched_transacties,
+        'aantal': len(matched_transacties)
+    })
+
 
 if __name__ == '__main__':
     init_database()
