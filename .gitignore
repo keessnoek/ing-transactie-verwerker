@@ -29,3 +29,7 @@ Thumbs.db
 # Flask
 instance/
 .env
+
+# Tooling
+source_collector.py
+sources.txt
