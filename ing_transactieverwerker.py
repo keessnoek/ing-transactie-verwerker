@@ -1192,6 +1192,306 @@ def preview_transacties():
         'aantal': len(matched_transacties)
     })
 
+@app.route('/dashboard')
+def dashboard():
+    """Dashboard met grafische weergaven van transacties"""
+    # Haal beschikbare jaren en maanden op voor dropdowns
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # Haal alle beschikbare jaar/maand combinaties op
+    cursor.execute('''
+        SELECT DISTINCT jaar, maand 
+        FROM transacties 
+        ORDER BY jaar DESC, maand DESC
+    ''')
+    
+    beschikbare_periodes = cursor.fetchall()
+    
+    # Haal unieke jaren op
+    jaren = sorted(list(set([periode[0] for periode in beschikbare_periodes])), reverse=True)
+    
+    # Default: huidige maand/jaar of laatste beschikbare
+    if beschikbare_periodes:
+        default_jaar = beschikbare_periodes[0][0]  # Meest recente jaar
+        default_maand = beschikbare_periodes[0][1]  # Meest recente maand
+    else:
+        default_jaar = datetime.now().year
+        default_maand = datetime.now().month
+    
+    conn.close()
+    
+    return render_template('dashboard.html', 
+                         jaren=jaren,
+                         default_jaar=default_jaar,
+                         default_maand=default_maand)
+
+@app.route('/dashboard/uitgaven-per-maand')
+def dashboard_uitgaven_per_maand():
+    """API voor uitgaven per maand - nu met datum selectie"""
+    # Haal parameters op (default = laatste 12 maanden)
+    eind_jaar = request.args.get('jaar', type=int)
+    eind_maand = request.args.get('maand', type=int)
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    if eind_jaar and eind_maand:
+        # Bereken start datum (12 maanden terug)
+        if eind_maand == 12:
+            # December: start in januari van hetzelfde jaar
+            start_jaar = eind_jaar
+            start_maand = 1
+        else:
+            # Andere maanden: start in volgende maand van vorig jaar
+            start_jaar = eind_jaar - 1
+            start_maand = eind_maand + 1
+        
+        # Haal data op voor specifieke periode
+        cursor.execute('''
+            SELECT jaar, maand, SUM(bedrag) as totaal
+            FROM transacties 
+            WHERE bedrag < 0 
+            AND ((jaar = ? AND maand >= ?) OR 
+                 (jaar > ? AND jaar < ?) OR 
+                 (jaar = ? AND maand <= ?))
+            GROUP BY jaar, maand
+            ORDER BY jaar, maand
+        ''', (start_jaar, start_maand, start_jaar, eind_jaar, eind_jaar, eind_maand))
+    else:
+        # Default: laatste 12 maanden
+        cursor.execute('''
+            SELECT jaar, maand, SUM(bedrag) as totaal
+            FROM transacties 
+            WHERE bedrag < 0
+            GROUP BY jaar, maand
+            ORDER BY jaar DESC, maand DESC
+            LIMIT 12
+        ''')
+    
+    data = cursor.fetchall()
+    conn.close()
+    
+    # Converteer naar Chart.js formaat
+    maanden = ['Jan', 'Feb', 'Mrt', 'Apr', 'Mei', 'Jun', 
+               'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dec']
+    
+    labels = []
+    bedragen = []
+    
+    # Voor specifieke periode: chronologische volgorde
+    # Voor default: reverse voor chronologische volgorde
+    data_sorted = data if (eind_jaar and eind_maand) else reversed(data)
+    
+    for jaar, maand, totaal in data_sorted:
+        labels.append(f"{maanden[maand-1]} {jaar}")
+        bedragen.append(abs(totaal))
+    
+    return jsonify({
+        'labels': labels,
+        'data': bedragen
+    })
+
+@app.route('/dashboard/top-categorien')
+def dashboard_top_categorien():
+    """API voor top uitgaven categorieën - nu met datum selectie"""
+    eind_jaar = request.args.get('jaar', type=int) or datetime.now().year
+    eind_maand = request.args.get('maand', type=int) or datetime.now().month
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # Bereken periode (12 maanden)
+    if eind_maand == 12:
+        start_jaar = eind_jaar
+        start_maand = 1
+    else:
+        start_jaar = eind_jaar - 1
+        start_maand = eind_maand + 1
+    
+    cursor.execute('''
+        SELECT c.naam, c.kleur, SUM(t.bedrag) as totaal
+        FROM transacties t
+        JOIN categorien c ON t.categorie_id = c.id
+        WHERE t.bedrag < 0 
+        AND ((t.jaar = ? AND t.maand >= ?) OR 
+             (t.jaar > ? AND t.jaar < ?) OR 
+             (t.jaar = ? AND t.maand <= ?))
+        GROUP BY c.id, c.naam, c.kleur
+        ORDER BY SUM(t.bedrag) ASC
+        LIMIT 8
+    ''', (start_jaar, start_maand, start_jaar, eind_jaar, eind_jaar, eind_maand))
+    
+    data = cursor.fetchall()
+    
+    # Ook transacties zonder categorie voor deze periode
+    cursor.execute('''
+        SELECT SUM(bedrag) as totaal
+        FROM transacties 
+        WHERE bedrag < 0 AND categorie_id IS NULL
+        AND ((jaar = ? AND maand >= ?) OR 
+             (jaar > ? AND jaar < ?) OR 
+             (jaar = ? AND maand <= ?))
+    ''', (start_jaar, start_maand, start_jaar, eind_jaar, eind_jaar, eind_maand))
+    
+    zonder_categorie = cursor.fetchone()[0] or 0
+    
+    conn.close()
+    
+    labels = []
+    bedragen = []
+    kleuren = []
+    
+    for naam, kleur, totaal in data:
+        labels.append(naam)
+        bedragen.append(abs(totaal))
+        kleuren.append(kleur)
+    
+    if abs(zonder_categorie) > 50:
+        labels.append('Zonder categorie')
+        bedragen.append(abs(zonder_categorie))
+        kleuren.append('#6c757d')
+    
+    return jsonify({
+        'labels': labels,
+        'data': bedragen,
+        'colors': kleuren
+    })
+
+@app.route('/dashboard/inkomsten-uitgaven')
+def dashboard_inkomsten_uitgaven():
+    """API voor inkomsten vs uitgaven - nu met datum selectie"""
+    eind_jaar = request.args.get('jaar', type=int)
+    eind_maand = request.args.get('maand', type=int)
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    if eind_jaar and eind_maand:
+        # Laatste 6 maanden van gekozen periode
+        if eind_maand > 6:
+            start_jaar = eind_jaar
+            start_maand = eind_maand - 5
+        else:
+            start_jaar = eind_jaar - 1
+            start_maand = eind_maand + 6
+        
+        cursor.execute('''
+            SELECT jaar, maand,
+                   SUM(CASE WHEN bedrag > 0 THEN bedrag ELSE 0 END) as inkomsten,
+                   SUM(CASE WHEN bedrag < 0 THEN bedrag ELSE 0 END) as uitgaven
+            FROM transacties 
+            WHERE ((jaar = ? AND maand >= ?) OR 
+                   (jaar > ? AND jaar < ?) OR 
+                   (jaar = ? AND maand <= ?))
+            GROUP BY jaar, maand
+            ORDER BY jaar, maand
+        ''', (start_jaar, start_maand, start_jaar, eind_jaar, eind_jaar, eind_maand))
+    else:
+        # Default: laatste 6 maanden
+        cursor.execute('''
+            SELECT jaar, maand,
+                   SUM(CASE WHEN bedrag > 0 THEN bedrag ELSE 0 END) as inkomsten,
+                   SUM(CASE WHEN bedrag < 0 THEN bedrag ELSE 0 END) as uitgaven
+            FROM transacties 
+            GROUP BY jaar, maand
+            ORDER BY jaar DESC, maand DESC
+            LIMIT 6
+        ''')
+    
+    data = cursor.fetchall()
+    conn.close()
+    
+    maanden = ['Jan', 'Feb', 'Mrt', 'Apr', 'Mei', 'Jun', 
+               'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dec']
+    
+    labels = []
+    inkomsten_data = []
+    uitgaven_data = []
+    
+    # Voor specifieke periode: al gesorteerd
+    # Voor default: reverse
+    data_sorted = data if (eind_jaar and eind_maand) else reversed(data)
+    
+    for jaar, maand, inkomsten, uitgaven in data_sorted:
+        labels.append(f"{maanden[maand-1]} {jaar}")
+        inkomsten_data.append(inkomsten)
+        uitgaven_data.append(abs(uitgaven))
+    
+    return jsonify({
+        'labels': labels,
+        'inkomsten': inkomsten_data,
+        'uitgaven': uitgaven_data
+    })
+
+@app.route('/dashboard/statistieken')
+def dashboard_statistieken():
+    """API voor algemene statistieken - nu met datum selectie"""
+    eind_jaar = request.args.get('jaar', type=int) or datetime.now().year
+    eind_maand = request.args.get('maand', type=int) or datetime.now().month
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # Bereken periode (12 maanden)
+    if eind_maand == 12:
+        start_jaar = eind_jaar
+        start_maand = 1
+    else:
+        start_jaar = eind_jaar - 1
+        start_maand = eind_maand + 1
+    
+    # Totalen voor geselecteerde periode
+    cursor.execute('''
+        SELECT 
+            COUNT(*) as totaal_transacties,
+            SUM(CASE WHEN bedrag > 0 THEN bedrag ELSE 0 END) as totaal_inkomsten,
+            SUM(CASE WHEN bedrag < 0 THEN bedrag ELSE 0 END) as totaal_uitgaven,
+            COUNT(DISTINCT categorie_id) as gecategoriseerd
+        FROM transacties 
+        WHERE ((jaar = ? AND maand >= ?) OR 
+               (jaar > ? AND jaar < ?) OR 
+               (jaar = ? AND maand <= ?))
+    ''', (start_jaar, start_maand, start_jaar, eind_jaar, eind_jaar, eind_maand))
+    
+    stats = cursor.fetchone()
+    
+    # Aantal categorieën (totaal, niet periode-specifiek)
+    cursor.execute('SELECT COUNT(*) FROM categorien')
+    aantal_categorien = cursor.fetchone()[0]
+    
+    # Zonder categorie voor deze periode
+    cursor.execute('''
+        SELECT COUNT(*) FROM transacties 
+        WHERE categorie_id IS NULL
+        AND ((jaar = ? AND maand >= ?) OR 
+             (jaar > ? AND jaar < ?) OR 
+             (jaar = ? AND maand <= ?))
+    ''', (start_jaar, start_maand, start_jaar, eind_jaar, eind_jaar, eind_maand))
+    
+    zonder_categorie = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    totaal_transacties, totaal_inkomsten, totaal_uitgaven, gecategoriseerd = stats
+    netto = totaal_inkomsten + totaal_uitgaven  # uitgaven zijn negatief
+    
+    # Bepaal periode label
+    maanden = ['Jan', 'Feb', 'Mrt', 'Apr', 'Mei', 'Jun', 
+               'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dec']
+    periode_label = f"{maanden[start_maand-1]} {start_jaar} - {maanden[eind_maand-1]} {eind_jaar}"
+    
+    return jsonify({
+        'totaal_transacties': totaal_transacties,
+        'totaal_inkomsten': totaal_inkomsten,
+        'totaal_uitgaven': abs(totaal_uitgaven),
+        'netto_resultaat': netto,
+        'aantal_categorien': aantal_categorien,
+        'zonder_categorie': zonder_categorie,
+        'periode': periode_label,
+        'eind_jaar': eind_jaar,
+        'eind_maand': eind_maand
+    })
 
 if __name__ == '__main__':
     init_database()

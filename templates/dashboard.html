@@ -1,0 +1,439 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - ING Transactie Verwerker{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-tachometer-alt me-2"></i>Dashboard</h2>
+        <p class="text-muted">Overzicht van je financiële gegevens in een oogopslag.</p>
+    </div>
+</div>
+
+<!-- Periode Selectie -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <h6 class="mb-2">
+                            <i class="fas fa-calendar me-2"></i>Periode Selectie
+                        </h6>
+                        <div class="row">
+                            <div class="col-6">
+                                <label for="eindMaand" class="form-label small">Eindmaand</label>
+                                <select class="form-select form-select-sm" id="eindMaand">
+                                    <option value="1">Januari</option>
+                                    <option value="2">Februari</option>
+                                    <option value="3">Maart</option>
+                                    <option value="4">April</option>
+                                    <option value="5">Mei</option>
+                                    <option value="6">Juni</option>
+                                    <option value="7">Juli</option>
+                                    <option value="8">Augustus</option>
+                                    <option value="9">September</option>
+                                    <option value="10">Oktober</option>
+                                    <option value="11">November</option>
+                                    <option value="12">December</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label for="eindJaar" class="form-label small">Eindjaar</label>
+                                <select class="form-select form-select-sm" id="eindJaar">
+                                    {% for jaar in jaren %}
+                                    <option value="{{ jaar }}" {% if jaar == default_jaar %}selected{% endif %}>{{ jaar }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center">
+                            <small class="text-muted d-block mb-2">Toont 12 maanden eindigend in:</small>
+                            <strong id="periodeLabel">Loading...</strong>
+                            <div class="mt-2">
+                                <button class="btn btn-primary btn-sm" onclick="updateDashboard()">
+                                    <i class="fas fa-sync me-1"></i>Update
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="text-end">
+                            <button class="btn btn-outline-secondary btn-sm" onclick="resetNaarHuidige()" title="Reset naar huidige periode">
+                                <i class="fas fa-home"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistieken Cards -->
+<div class="row mb-4" id="statistiekenCards">
+    <!-- Wordt geladen via JavaScript -->
+</div>
+
+<!-- Charts Row 1 -->
+<div class="row mb-4">
+    <!-- Uitgaven per maand -->
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-line me-2 text-danger"></i>
+                    Uitgaven per Maand
+                </h5>
+                <small class="text-muted">Laatste 12 maanden</small>
+            </div>
+            <div class="card-body">
+                <canvas id="uitgavenChart" width="400" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Top Categorieën -->
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-pie me-2 text-info"></i>
+                    Top Uitgaven Categorieën
+                </h5>
+                <small class="text-muted">Dit jaar</small>
+            </div>
+            <div class="card-body">
+                <canvas id="categorienChart" width="300" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 2 -->
+<div class="row mb-4">
+    <!-- Inkomsten vs Uitgaven -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-bar me-2 text-success"></i>
+                    Inkomsten vs Uitgaven
+                </h5>
+                <small class="text-muted">Laatste 6 maanden</small>
+            </div>
+            <div class="card-body">
+                <canvas id="inkomstenUitgavenChart" width="400" height="150"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading indicator -->
+<div id="loadingIndicator" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status"></div>
+    <p class="mt-2">Dashboard wordt geladen...</p>
+</div>
+
+<!-- Error message -->
+<div id="errorMessage" class="alert alert-danger d-none">
+    <i class="fas fa-exclamation-triangle me-2"></i>
+    <span id="errorText">Er is een fout opgetreden bij het laden van de dashboard gegevens.</span>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Chart instances (globaal zodat we ze kunnen updaten)
+let uitgavenChart, categorienChart, inkomstenUitgavenChart;
+let huidigeJaar = {{ default_jaar }};
+let huidigeMaand = {{ default_maand }};
+
+// Kleuren palette
+const colors = {
+    primary: '#007bff',
+    success: '#28a745', 
+    danger: '#dc3545',
+    warning: '#ffc107',
+    info: '#17a2b8',
+    light: '#f8f9fa',
+    dark: '#343a40'
+};
+
+// Maandnamen voor labels
+const maandNamen = [
+    'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
+    'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December'
+];
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Set default values in dropdowns
+    document.getElementById('eindMaand').value = huidigeMaand;
+    document.getElementById('eindJaar').value = huidigeJaar;
+    updatePeriodeLabel();
+    
+    // Event listeners voor periode change
+    document.getElementById('eindMaand').addEventListener('change', updatePeriodeLabel);
+    document.getElementById('eindJaar').addEventListener('change', updatePeriodeLabel);
+    
+    laadDashboard();
+});
+
+async function laadDashboard() {
+    try {
+        // Haal huidige selectie op
+        const jaar = document.getElementById('eindJaar').value;
+        const maand = document.getElementById('eindMaand').value;
+        
+        // Bouw URL parameters
+        const params = `?jaar=${jaar}&maand=${maand}`;
+        
+        // Laad alle data parallel
+        const [statistieken, uitgavenData, categorienData, inkomstenUitgavenData] = await Promise.all([
+            fetch('/dashboard/statistieken' + params).then(r => r.json()),
+            fetch('/dashboard/uitgaven-per-maand' + params).then(r => r.json()),
+            fetch('/dashboard/top-categorien' + params).then(r => r.json()),
+            fetch('/dashboard/inkomsten-uitgaven' + params).then(r => r.json())
+        ]);
+        
+        // Toon statistieken
+        toonStatistieken(statistieken);
+        
+        // Maak charts
+        maakUitgavenChart(uitgavenData);
+        maakCategorienChart(categorienData);
+        maakInkomstenUitgavenChart(inkomstenUitgavenData);
+        
+        // Verberg loading
+        document.getElementById('loadingIndicator').style.display = 'none';
+        
+    } catch (error) {
+        console.error('Dashboard load error:', error);
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('errorMessage').classList.remove('d-none');
+    }
+}
+
+function updatePeriodeLabel() {
+    const jaar = document.getElementById('eindJaar').value;
+    const maand = parseInt(document.getElementById('eindMaand').value);
+    document.getElementById('periodeLabel').textContent = `${maandNamen[maand - 1]} ${jaar}`;
+}
+
+function updateDashboard() {
+    // Destroy bestaande charts
+    if (uitgavenChart) uitgavenChart.destroy();
+    if (categorienChart) categorienChart.destroy();
+    if (inkomstenUitgavenChart) inkomstenUitgavenChart.destroy();
+    
+    // Toon loading
+    document.getElementById('loadingIndicator').style.display = 'block';
+    
+    // Herlaad met nieuwe parameters
+    laadDashboard();
+}
+
+function resetNaarHuidige() {
+    document.getElementById('eindJaar').value = huidigeJaar;
+    document.getElementById('eindMaand').value = huidigeMaand;
+    updatePeriodeLabel();
+    updateDashboard();
+}
+
+function toonStatistieken(stats) {
+    const container = document.getElementById('statistiekenCards');
+    
+    const netto_kleur = stats.netto_resultaat >= 0 ? 'success' : 'danger';
+    const netto_icon = stats.netto_resultaat >= 0 ? 'arrow-up' : 'arrow-down';
+    
+    container.innerHTML = `
+        <div class="col-md-3">
+            <div class="card text-center border-primary">
+                <div class="card-body">
+                    <i class="fas fa-list fa-2x text-primary mb-2"></i>
+                    <h4>${stats.totaal_transacties.toLocaleString()}</h4>
+                    <p class="text-muted mb-0">Transacties</p>
+                    <small class="text-muted">${stats.periode}</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-success">
+                <div class="card-body">
+                    <i class="fas fa-arrow-up fa-2x text-success mb-2"></i>
+                    <h4 class="text-success">€${stats.totaal_inkomsten.toLocaleString()}</h4>
+                    <p class="text-muted mb-0">Inkomsten</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-danger">
+                <div class="card-body">
+                    <i class="fas fa-arrow-down fa-2x text-danger mb-2"></i>
+                    <h4 class="text-danger">€${stats.totaal_uitgaven.toLocaleString()}</h4>
+                    <p class="text-muted mb-0">Uitgaven</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-${netto_kleur}">
+                <div class="card-body">
+                    <i class="fas fa-${netto_icon} fa-2x text-${netto_kleur} mb-2"></i>
+                    <h4 class="text-${netto_kleur}">${stats.netto_resultaat >= 0 ? '+' : ''}€${stats.netto_resultaat.toLocaleString()}</h4>
+                    <p class="text-muted mb-0">Netto Resultaat</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function maakUitgavenChart(data) {
+    const ctx = document.getElementById('uitgavenChart').getContext('2d');
+    
+    uitgavenChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                label: 'Uitgaven',
+                data: data.data,
+                borderColor: colors.danger,
+                backgroundColor: colors.danger + '20',
+                tension: 0.4,
+                fill: true,
+                pointBackgroundColor: colors.danger,
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '€' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return 'Uitgaven: €' + context.parsed.y.toLocaleString();
+                        }
+                    }
+                },
+                legend: {
+                    display: false
+                }
+            }
+        }
+    });
+}
+
+function maakCategorienChart(data) {
+    const ctx = document.getElementById('categorienChart').getContext('2d');
+    
+    categorienChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                data: data.data,
+                backgroundColor: data.colors,
+                borderWidth: 2,
+                borderColor: '#fff'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((context.parsed / total) * 100).toFixed(1);
+                            return context.label + ': €' + context.parsed.toLocaleString() + ' (' + percentage + '%)';
+                        }
+                    }
+                },
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+}
+
+function maakInkomstenUitgavenChart(data) {
+    const ctx = document.getElementById('inkomstenUitgavenChart').getContext('2d');
+    
+    inkomstenUitgavenChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.labels,
+            datasets: [
+                {
+                    label: 'Inkomsten',
+                    data: data.inkomsten,
+                    backgroundColor: colors.success + '80',
+                    borderColor: colors.success,
+                    borderWidth: 1
+                },
+                {
+                    label: 'Uitgaven', 
+                    data: data.uitgaven,
+                    backgroundColor: colors.danger + '80',
+                    borderColor: colors.danger,
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '€' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': €' + context.parsed.y.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Refresh functie voor later gebruik
+function refreshDashboard() {
+    // Destroy bestaande charts
+    if (uitgavenChart) uitgavenChart.destroy();
+    if (categorienChart) categorienChart.destroy();
+    if (inkomstenUitgavenChart) inkomstenUitgavenChart.destroy();
+    
+    // Herlaad
+    document.getElementById('loadingIndicator').style.display = 'block';
+    laadDashboard();
+}
+</script>
+{% endblock %}
