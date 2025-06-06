@@ -17,6 +17,9 @@ ENV/
 # Uploads
 uploads/
 
+# Doc
+docs/
+
 # IDE
 .vscode/
 *.swp
