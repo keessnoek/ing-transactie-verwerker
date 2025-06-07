@@ -142,6 +142,94 @@
     <i class="fas fa-exclamation-triangle me-2"></i>
     <span id="errorText">Er is een fout opgetreden bij het laden van de dashboard gegevens.</span>
 </div>
+
+<!-- Dashboard Drill-down Modal -->
+<div class="modal fade" id="drilldownModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="drilldownModalTitle">
+                    <i class="fas fa-chart-line me-2"></i>Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Loading indicator voor modal -->
+                <div id="drilldownModalLoading" class="text-center py-5 d-none">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Transacties laden...</p>
+                </div>
+                
+                <!-- Statistieken -->
+                <div id="drilldownModalStats" class="row mb-4 d-none">
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body py-2">
+                                <h6 id="drilldownStatAantal" class="mb-1">0</h6>
+                                <small class="text-muted">Transacties</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body py-2">
+                                <h6 id="drilldownStatTotaal" class="mb-1">€0,00</h6>
+                                <small class="text-muted">Totaal</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body py-2">
+                                <h6 id="drilldownStatUitgaven" class="mb-1 transaction-negative">€0,00</h6>
+                                <small class="text-muted">Uitgaven</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body py-2">
+                                <h6 id="drilldownStatInkomsten" class="mb-1 transaction-positive">€0,00</h6>
+                                <small class="text-muted">Inkomsten</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Transacties tabel -->
+                <div id="drilldownModalTransacties" class="d-none">
+                    <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                        <table class="table table-sm table-hover">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>Datum</th>
+                                    <th>Naam</th>
+                                    <th>Bedrag</th>
+                                    <th>Code</th>
+                                    <th>Mededelingen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="drilldownModalTransactiesBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Geen data -->
+                <div id="drilldownModalGeenData" class="text-center py-5 d-none">
+                    <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                    <h6 class="text-muted">Geen transacties gevonden</h6>
+                    <p class="text-muted">Er zijn geen transacties voor deze selectie.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Sluiten</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
 {% endblock %}
 
 {% block scripts %}
@@ -434,6 +522,268 @@ function refreshDashboard() {
     // Herlaad
     document.getElementById('loadingIndicator').style.display = 'block';
     laadDashboard();
+}
+
+let huidigDashboardJaar, huidigDashboardMaand;
+
+// Update de bestaande maakUitgavenChart functie om click events toe te voegen
+function maakUitgavenChart(data) {
+    const ctx = document.getElementById('uitgavenChart').getContext('2d');
+    
+    uitgavenChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                label: 'Uitgaven',
+                data: data.data,
+                borderColor: colors.danger,
+                backgroundColor: colors.danger + '20',
+                tension: 0.4,
+                fill: true,
+                pointBackgroundColor: colors.danger,
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            // NIEUWE onClick handler
+            onClick: function(event, elements) {
+                if (elements.length > 0) {
+                    const elementIndex = elements[0].index;
+                    const label = data.labels[elementIndex];
+                    toonMaandDetails(label, elementIndex);
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '€' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return 'Uitgaven: €' + context.parsed.y.toLocaleString();
+                        },
+                        afterLabel: function(context) {
+                            return 'Klik voor details'; // Extra hint
+                        }
+                    }
+                },
+                legend: {
+                    display: false
+                }
+            },
+            // Cursor veranderen bij hover
+            onHover: function(event, activeElements) {
+                event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
+            }
+        }
+    });
+}
+
+// Update de bestaande maakCategorienChart functie om click events toe te voegen
+// Globale variabele om categorie IDs op te slaan
+let categorieDataForClick = null;
+
+// Aangepaste maakCategorienChart functie
+function maakCategorienChart(data) {
+    const ctx = document.getElementById('categorienChart').getContext('2d');
+    
+    // Sla data op voor click handling
+    categorieDataForClick = data;
+    
+    categorienChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                data: data.data,
+                backgroundColor: data.colors,
+                borderWidth: 2,
+                borderColor: '#fff'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            // VERBETERDE onClick handler
+            onClick: function(event, elements) {
+                if (elements.length > 0) {
+                    const elementIndex = elements[0].index;
+                    const categorieNaam = data.labels[elementIndex];
+                    const categorieId = data.categorie_ids[elementIndex]; // Nu uit de data!
+                    toonCategorieDetails(categorieNaam, categorieId);
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((context.parsed / total) * 100).toFixed(1);
+                            return context.label + ': €' + context.parsed.toLocaleString() + ' (' + percentage + '%)';
+                        },
+                        afterLabel: function(context) {
+                            return 'Klik voor details'; // Extra hint
+                        }
+                    }
+                },
+                legend: {
+                    position: 'bottom'
+                }
+            },
+            // Cursor veranderen bij hover
+            onHover: function(event, activeElements) {
+                event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
+            }
+        }
+    });
+}
+
+// Nieuwe functie om maand details te tonen
+function toonMaandDetails(maandLabel, maandIndex) {
+    // Parse jaar en maand uit het label (bijv. "Jan 2025")
+    const parts = maandLabel.split(' ');
+    const jaar = parseInt(parts[1]);
+    
+    // Converteer maandnaam naar nummer
+    const maandNamen = ['Jan', 'Feb', 'Mrt', 'Apr', 'Mei', 'Jun', 
+                        'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dec'];
+    const maand = maandNamen.indexOf(parts[0]) + 1;
+    
+    // Open modal met loading state
+    const modal = new bootstrap.Modal(document.getElementById('drilldownModal'));
+    document.getElementById('drilldownModalTitle').innerHTML = 
+        `<i class="fas fa-calendar me-2"></i>Uitgaven ${maandLabel}`;
+    
+    resetModalContent();
+    document.getElementById('drilldownModalLoading').classList.remove('d-none');
+    modal.show();
+    
+    // Fetch data
+    fetch(`/dashboard/maand-details?jaar=${jaar}&maand=${maand}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            vulModalMet(data, 'maand');
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            toonModalError(error.message);
+        });
+}
+
+// Nieuwe functie om categorie details te tonen
+function toonCategorieDetails(categorieNaam, categorieId) {
+    // Open modal met loading state
+    const modal = new bootstrap.Modal(document.getElementById('drilldownModal'));
+    document.getElementById('drilldownModalTitle').innerHTML = 
+        `<i class="fas fa-tag me-2"></i>Categorie: ${categorieNaam}`;
+    
+    resetModalContent();
+    document.getElementById('drilldownModalLoading').classList.remove('d-none');
+    modal.show();
+    
+    // Gebruik huidige dashboard periode
+    const jaar = document.getElementById('eindJaar').value;
+    const maand = document.getElementById('eindMaand').value;
+    
+    // Fetch data
+    const categorieParam = categorieId !== null ? categorieId : 'null';
+    fetch(`/dashboard/categorie-details?categorie_id=${categorieParam}&jaar=${jaar}&maand=${maand}&periode=12`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            vulModalMet(data, 'categorie');
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            toonModalError(error.message);
+        });
+}
+
+// Helper functie om categorie ID te vinden op basis van naam
+function getCategorieIdByNaam(naam) {
+    // Deze functie is niet meer nodig omdat we IDs nu uit de data halen
+    // Maar laten we hem behouden voor backwards compatibility
+    if (!categorieDataForClick) return null;
+    
+    const index = categorieDataForClick.labels.indexOf(naam);
+    if (index !== -1) {
+        return categorieDataForClick.categorie_ids[index];
+    }
+    
+    return null;
+}
+
+// Nieuwe functies voor modal handling
+function resetModalContent() {
+    document.getElementById('drilldownModalLoading').classList.add('d-none');
+    document.getElementById('drilldownModalStats').classList.add('d-none');
+    document.getElementById('drilldownModalTransacties').classList.add('d-none');
+    document.getElementById('drilldownModalGeenData').classList.add('d-none');
+}
+
+function vulModalMet(data, type) {
+    document.getElementById('drilldownModalLoading').classList.add('d-none');
+    
+    if (data.transacties.length === 0) {
+        document.getElementById('drilldownModalGeenData').classList.remove('d-none');
+        return;
+    }
+    
+    // Vul statistieken
+    document.getElementById('drilldownStatAantal').textContent = data.statistieken.aantal;
+    document.getElementById('drilldownStatTotaal').textContent = data.statistieken.totaal_formatted;
+    document.getElementById('drilldownStatUitgaven').textContent = data.statistieken.uitgaven_formatted;
+    document.getElementById('drilldownStatInkomsten').textContent = data.statistieken.inkomsten_formatted;
+    document.getElementById('drilldownModalStats').classList.remove('d-none');
+    
+    // Vul transacties tabel
+    const tbody = document.getElementById('drilldownModalTransactiesBody');
+    tbody.innerHTML = '';
+    
+    data.transacties.forEach(transactie => {
+        const row = tbody.insertRow();
+        row.innerHTML = `
+            <td><small>${transactie.datum}</small></td>
+            <td>${transactie.naam}</td>
+            <td class="${transactie.bedrag >= 0 ? 'transaction-positive' : 'transaction-negative'}">
+                ${transactie.bedrag_formatted}
+            </td>
+            <td><span class="badge bg-secondary">${transactie.code}</span></td>
+            <td><small class="text-muted" title="${transactie.mededelingen}">
+                ${transactie.mededelingen.length > 50 ? 
+                  transactie.mededelingen.substring(0, 50) + '...' : 
+                  transactie.mededelingen || '-'}
+            </small></td>
+        `;
+    });
+    
+    document.getElementById('drilldownModalTransacties').classList.remove('d-none');
+}
+
+function toonModalError(errorMessage) {
+    document.getElementById('drilldownModalLoading').classList.add('d-none');
+    document.getElementById('drilldownModalTransactiesBody').innerHTML = 
+        `<tr><td colspan="5" class="text-center text-danger">
+            <i class="fas fa-exclamation-triangle me-2"></i>Fout bij laden: ${errorMessage}
+        </td></tr>`;
+    document.getElementById('drilldownModalTransacties').classList.remove('d-none');
 }
 </script>
 {% endblock %}

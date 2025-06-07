@@ -1294,7 +1294,7 @@ def dashboard_uitgaven_per_maand():
 
 @app.route('/dashboard/top-categorien')
 def dashboard_top_categorien():
-    """API voor top uitgaven categorieën - nu met datum selectie"""
+    """API voor top uitgaven categorieën - nu met categorie IDs voor drill-down"""
     eind_jaar = request.args.get('jaar', type=int) or datetime.now().year
     eind_maand = request.args.get('maand', type=int) or datetime.now().month
     
@@ -1310,7 +1310,7 @@ def dashboard_top_categorien():
         start_maand = eind_maand + 1
     
     cursor.execute('''
-        SELECT c.naam, c.kleur, SUM(t.bedrag) as totaal
+        SELECT c.id, c.naam, c.kleur, SUM(t.bedrag) as totaal
         FROM transacties t
         JOIN categorien c ON t.categorie_id = c.id
         WHERE t.bedrag < 0 
@@ -1341,21 +1341,25 @@ def dashboard_top_categorien():
     labels = []
     bedragen = []
     kleuren = []
+    categorie_ids = []  # NIEUWE ARRAY voor IDs
     
-    for naam, kleur, totaal in data:
+    for cat_id, naam, kleur, totaal in data:
         labels.append(naam)
         bedragen.append(abs(totaal))
         kleuren.append(kleur)
+        categorie_ids.append(cat_id)  # Voeg ID toe
     
     if abs(zonder_categorie) > 50:
         labels.append('Zonder categorie')
         bedragen.append(abs(zonder_categorie))
         kleuren.append('#6c757d')
+        categorie_ids.append(None)  # null voor zonder categorie
     
     return jsonify({
         'labels': labels,
         'data': bedragen,
-        'colors': kleuren
+        'colors': kleuren,
+        'categorie_ids': categorie_ids  # NIEUWE DATA
     })
 
 @app.route('/dashboard/inkomsten-uitgaven')
@@ -1491,6 +1495,224 @@ def dashboard_statistieken():
         'periode': periode_label,
         'eind_jaar': eind_jaar,
         'eind_maand': eind_maand
+    })
+
+@app.route('/dashboard/maand-details')
+def dashboard_maand_details():
+    """API voor transactie details van een specifieke maand (voor uitgaven chart drill-down)"""
+    jaar = request.args.get('jaar', type=int)
+    maand = request.args.get('maand', type=int)
+    
+    if not jaar or not maand:
+        return jsonify({'error': 'Jaar en maand parameters zijn verplicht'}), 400
+    
+    if maand < 1 or maand > 12:
+        return jsonify({'error': 'Maand moet tussen 1 en 12 zijn'}), 400
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # Haal alle transacties voor deze maand op
+    cursor.execute('''
+        SELECT t.id, t.datum, t.naam, t.bedrag, t.code, t.mededelingen, 
+               t.tegenrekening, c.naam as categorie_naam
+        FROM transacties t
+        LEFT JOIN categorien c ON t.categorie_id = c.id
+        WHERE t.jaar = ? AND t.maand = ?
+        ORDER BY t.datum DESC, t.bedrag DESC
+    ''', (jaar, maand))
+    
+    transacties = cursor.fetchall()
+    
+    # Bereken statistieken
+    if transacties:
+        bedragen = [t[3] for t in transacties]
+        totaal_bedrag = sum(bedragen)
+        uitgaven = sum(b for b in bedragen if b < 0)
+        inkomsten = sum(b for b in bedragen if b > 0)
+        gemiddeld = totaal_bedrag / len(bedragen)
+    else:
+        totaal_bedrag = uitgaven = inkomsten = gemiddeld = 0
+    
+    # Maandnamen voor mooiere weergave
+    maand_namen = [
+        '', 'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
+        'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December'
+    ]
+    
+    conn.close()
+    
+    # Format transacties voor JSON
+    transacties_formatted = []
+    for t in transacties:
+        transacties_formatted.append({
+            'id': t[0],
+            'datum': t[1],
+            'naam': t[2],
+            'bedrag': t[3],
+            'bedrag_formatted': f"€{abs(t[3]):.2f}" if t[3] >= 0 else f"-€{abs(t[3]):.2f}",
+            'code': t[4],
+            'mededelingen': t[5] or '',
+            'tegenrekening': t[6] or '',
+            'categorie': t[7] or 'Zonder categorie'
+        })
+    
+    return jsonify({
+        'transacties': transacties_formatted,
+        'statistieken': {
+            'aantal': len(transacties),
+            'totaal': totaal_bedrag,
+            'totaal_formatted': f"€{abs(totaal_bedrag):.2f}" if totaal_bedrag >= 0 else f"-€{abs(totaal_bedrag):.2f}",
+            'uitgaven': uitgaven,
+            'uitgaven_formatted': f"-€{abs(uitgaven):.2f}" if uitgaven < 0 else "€0,00",
+            'inkomsten': inkomsten, 
+            'inkomsten_formatted': f"€{inkomsten:.2f}",
+            'gemiddeld': gemiddeld,
+            'gemiddeld_formatted': f"€{abs(gemiddeld):.2f}" if gemiddeld >= 0 else f"-€{abs(gemiddeld):.2f}"
+        },
+        'context': {
+            'jaar': jaar,
+            'maand': maand,
+            'maand_naam': maand_namen[maand],
+            'type': 'maand_overzicht'
+        }
+    })
+
+
+@app.route('/dashboard/categorie-details')
+def dashboard_categorie_details():
+    """API voor transactie details van een specifieke categorie (voor categorie chart drill-down)"""
+    categorie_id_str = request.args.get('categorie_id')
+    periode_maanden = request.args.get('periode', type=int, default=12)  # Default 12 maanden
+    eind_jaar = request.args.get('jaar', type=int)
+    eind_maand = request.args.get('maand', type=int)
+    
+    # Validatie
+    if not categorie_id_str:
+        return jsonify({'error': 'Categorie_id parameter is verplicht'}), 400
+    
+    # Converteer categorie_id (kan null zijn voor "zonder categorie")
+    categorie_id = None
+    if categorie_id_str and categorie_id_str != 'null':
+        try:
+            categorie_id = int(categorie_id_str)
+        except ValueError:
+            return jsonify({'error': 'Ongeldige categorie_id'}), 400
+    
+    # Bereken periode (laatste X maanden tot aan eind_jaar/eind_maand)
+    if not eind_jaar or not eind_maand:
+        # Default: huidige maand uit de data
+        conn = sqlite3.connect('transacties.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(jaar), MAX(maand) FROM transacties WHERE jaar = (SELECT MAX(jaar) FROM transacties)')
+        result = cursor.fetchone()
+        eind_jaar, eind_maand = result if result[0] else (datetime.now().year, datetime.now().month)
+        conn.close()
+    
+    # Bereken start periode
+    if eind_maand > periode_maanden:
+        start_jaar = eind_jaar
+        start_maand = eind_maand - periode_maanden + 1
+    else:
+        start_jaar = eind_jaar - 1
+        start_maand = eind_maand + 12 - periode_maanden + 1
+    
+    conn = sqlite3.connect('transacties.db')
+    cursor = conn.cursor()
+    
+    # Haal categorie info op
+    if categorie_id is not None:
+        cursor.execute('SELECT naam FROM categorien WHERE id = ?', (categorie_id,))
+        categorie_result = cursor.fetchone()
+        if not categorie_result:
+            conn.close()
+            return jsonify({'error': f'Categorie {categorie_id} niet gevonden'}), 404
+        categorie_naam = categorie_result[0]
+    else:
+        categorie_naam = 'Zonder categorie'
+    
+    # Bouw query voor periode
+    if categorie_id is not None:
+        cursor.execute('''
+            SELECT t.id, t.datum, t.naam, t.bedrag, t.code, t.mededelingen, 
+                   t.tegenrekening, c.naam as categorie_naam
+            FROM transacties t
+            LEFT JOIN categorien c ON t.categorie_id = c.id
+            WHERE t.categorie_id = ?
+            AND ((t.jaar = ? AND t.maand >= ?) OR 
+                 (t.jaar > ? AND t.jaar < ?) OR 
+                 (t.jaar = ? AND t.maand <= ?))
+            ORDER BY t.datum DESC, t.bedrag DESC
+        ''', (categorie_id, start_jaar, start_maand, start_jaar, eind_jaar, eind_jaar, eind_maand))
+    else:
+        cursor.execute('''
+            SELECT t.id, t.datum, t.naam, t.bedrag, t.code, t.mededelingen, 
+                   t.tegenrekening, 'Zonder categorie' as categorie_naam
+            FROM transacties t
+            WHERE t.categorie_id IS NULL
+            AND ((t.jaar = ? AND t.maand >= ?) OR 
+                 (t.jaar > ? AND t.jaar < ?) OR 
+                 (t.jaar = ? AND t.maand <= ?))
+            ORDER BY t.datum DESC, t.bedrag DESC
+        ''', (start_jaar, start_maand, start_jaar, eind_jaar, eind_jaar, eind_maand))
+    
+    transacties = cursor.fetchall()
+    
+    # Bereken statistieken
+    if transacties:
+        bedragen = [t[3] for t in transacties]
+        totaal_bedrag = sum(bedragen)
+        uitgaven = sum(b for b in bedragen if b < 0)
+        inkomsten = sum(b for b in bedragen if b > 0)
+        gemiddeld = totaal_bedrag / len(bedragen)
+    else:
+        totaal_bedrag = uitgaven = inkomsten = gemiddeld = 0
+    
+    # Maandnamen voor periode beschrijving
+    maand_namen = [
+        '', 'Januari', 'Februari', 'Maart', 'April', 'Mei', 'Juni',
+        'Juli', 'Augustus', 'September', 'Oktober', 'November', 'December'
+    ]
+    
+    periode_beschrijving = f"{maand_namen[start_maand]} {start_jaar} - {maand_namen[eind_maand]} {eind_jaar}"
+    
+    conn.close()
+    
+    # Format transacties voor JSON
+    transacties_formatted = []
+    for t in transacties:
+        transacties_formatted.append({
+            'id': t[0],
+            'datum': t[1],
+            'naam': t[2],
+            'bedrag': t[3],
+            'bedrag_formatted': f"€{abs(t[3]):.2f}" if t[3] >= 0 else f"-€{abs(t[3]):.2f}",
+            'code': t[4],
+            'mededelingen': t[5] or '',
+            'tegenrekening': t[6] or '',
+            'categorie': t[7]
+        })
+    
+    return jsonify({
+        'transacties': transacties_formatted,
+        'statistieken': {
+            'aantal': len(transacties),
+            'totaal': totaal_bedrag,
+            'totaal_formatted': f"€{abs(totaal_bedrag):.2f}" if totaal_bedrag >= 0 else f"-€{abs(totaal_bedrag):.2f}",
+            'uitgaven': uitgaven,
+            'uitgaven_formatted': f"-€{abs(uitgaven):.2f}" if uitgaven < 0 else "€0,00",
+            'inkomsten': inkomsten, 
+            'inkomsten_formatted': f"€{inkomsten:.2f}",
+            'gemiddeld': gemiddeld,
+            'gemiddeld_formatted': f"€{abs(gemiddeld):.2f}" if gemiddeld >= 0 else f"-€{abs(gemiddeld):.2f}"
+        },
+        'context': {
+            'categorie_id': categorie_id,
+            'categorie_naam': categorie_naam,
+            'periode': periode_beschrijving,
+            'periode_maanden': periode_maanden,
+            'type': 'categorie_overzicht'
+        }
     })
 
 if __name__ == '__main__':
