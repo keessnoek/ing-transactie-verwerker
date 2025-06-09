@@ -12,8 +12,7 @@
 
 <div class="row mb-3">
     <div class="col-md-6">
-        <form method="GET" action="{{ url_for('transacties') }}">
-            <!-- Behoud huidige sort parameters -->
+        <form method="GET" action="{{ url_for('transactions.transacties') }}">
             {% if current_sort %}
             <input type="hidden" name="sort" value="{{ current_sort }}">
             {% endif %}
@@ -28,7 +27,7 @@
                        placeholder="Zoeken in transacties...">
                 <button class="btn btn-primary" type="submit">Zoek</button>
                 {% if zoekterm %}
-                <a href="{{ url_for('transacties', sort=current_sort, order=current_order) }}" class="btn btn-outline-secondary">Wissen</a>
+                <a href="{{ url_for('transactions.transacties', sort=current_sort, order=current_order) }}" class="btn btn-outline-secondary">Wissen</a>
                 {% endif %}
             </div>
         </form>
@@ -45,7 +44,6 @@
     </div>
 </div>
 
-<!-- Resultaten info -->
 {% if zoekterm %}
 <div class="row mb-3">
     <div class="col-12">
@@ -60,7 +58,6 @@
 </div>
 {% endif %}
 
-<!-- Sort info -->
 {% if current_sort %}
 <div class="row mb-2">
     <div class="col-12">
@@ -213,14 +210,13 @@
             {% else %}
             <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
             <h5 class="text-muted">Nog geen transacties</h5>
-            <p class="text-muted">Begin met het <a href="{{ url_for('importeren') }}">importeren van een CSV-bestand</a>.</p>
+            <p class="text-muted">Begin met het <a href="{{ url_for('import.importeren') }}">importeren van een CSV-bestand</a>.</p>
             {% endif %}
         </div>
         {% endif %}
     </div>
 </div>
 
-<!-- Loading indicator -->
 <div id="loadingIndicator" class="position-fixed top-50 start-50 translate-middle d-none">
     <div class="spinner-border text-primary" role="status">
         <span class="visually-hidden">Loading...</span>
@@ -230,7 +226,6 @@
 
 {% block scripts %}
 <script>
-// Toggle kolommen (bestaande functie)
 function toggleColumn(columnClass) {
     const columns = document.querySelectorAll('.' + columnClass + '-col');
     const isHidden = columns[0].style.display === 'none';
@@ -239,7 +234,6 @@ function toggleColumn(columnClass) {
         col.style.display = isHidden ? '' : 'none';
     });
     
-    // Update button text
     const button = event.target.closest('button');
     const icon = button.querySelector('i');
     if (isHidden) {
@@ -249,17 +243,14 @@ function toggleColumn(columnClass) {
     }
 }
 
-// Update categorie via AJAX (bestaande functie)
 function updateCategorie(selectElement) {
     const transactieId = selectElement.getAttribute('data-transactie-id');
     const categorieId = selectElement.value;
     const loadingIndicator = document.getElementById('loadingIndicator');
     
-    // Toon loading indicator
     loadingIndicator.classList.remove('d-none');
     
-    // Stuur AJAX request
-    fetch('/transacties/update-categorie', {
+    fetch('/transactions/update-categorie', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -268,7 +259,6 @@ function updateCategorie(selectElement) {
     })
     .then(response => {
         if (response.ok) {
-            // Toon success feedback
             selectElement.style.backgroundColor = '#d4edda';
             setTimeout(() => {
                 selectElement.style.backgroundColor = '';
@@ -280,16 +270,13 @@ function updateCategorie(selectElement) {
     .catch(error => {
         console.error('Error:', error);
         alert('Er is een fout opgetreden bij het opslaan van de categorie.');
-        // Reset selectie bij fout
         selectElement.selectedIndex = 0;
     })
     .finally(() => {
-        // Verberg loading indicator
         loadingIndicator.classList.add('d-none');
     });
 }
 
-// NIEUWE FUNCTIE: Sorteer functionaliteit
 document.addEventListener('DOMContentLoaded', function() {
     const sortableHeaders = document.querySelectorAll('.sortable-header');
     
@@ -300,26 +287,21 @@ document.addEventListener('DOMContentLoaded', function() {
             const currentSort = '{{ current_sort }}';
             const currentOrder = '{{ current_order }}';
             
-            // Bepaal nieuwe sort order
-            let newOrder = 'desc'; // Default
+            let newOrder = 'desc';
             if (column === currentSort) {
-                // Toggle tussen asc/desc voor huidige kolom
                 newOrder = currentOrder === 'asc' ? 'desc' : 'asc';
             } else {
-                // Voor nieuwe kolom: gebruik logische default
                 if (column === 'naam' || column === 'code' || column === 'categorie') {
-                    newOrder = 'asc'; // Alfabetisch
+                    newOrder = 'asc';
                 } else {
-                    newOrder = 'desc'; // Numeriek/datum: hoogste/nieuwste eerst
+                    newOrder = 'desc';
                 }
             }
             
-            // Bouw nieuwe URL met behoud van zoekterm
             const urlParams = new URLSearchParams(window.location.search);
             urlParams.set('sort', column);
             urlParams.set('order', newOrder);
             
-            // Navigeer naar nieuwe URL
             window.location.href = window.location.pathname + '?' + urlParams.toString();
         });
     });

@@ -229,12 +229,14 @@
     </div>
 </div>
 
-
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+// Globale variabelen voor drill-down
+let categorieDataForClick = null;
+
 // Chart instances (globaal zodat we ze kunnen updaten)
 let uitgavenChart, categorienChart, inkomstenUitgavenChart;
 let huidigeJaar = {{ default_jaar }};
@@ -279,12 +281,12 @@ async function laadDashboard() {
         // Bouw URL parameters
         const params = `?jaar=${jaar}&maand=${maand}`;
         
-        // Laad alle data parallel
+        // GEFIXTE API CALLS - NU MET /reports/ PREFIX!
         const [statistieken, uitgavenData, categorienData, inkomstenUitgavenData] = await Promise.all([
-            fetch('/dashboard/statistieken' + params).then(r => r.json()),
-            fetch('/dashboard/uitgaven-per-maand' + params).then(r => r.json()),
-            fetch('/dashboard/top-categorien' + params).then(r => r.json()),
-            fetch('/dashboard/inkomsten-uitgaven' + params).then(r => r.json())
+            fetch('/reports/dashboard/statistieken' + params).then(r => r.json()),
+            fetch('/reports/dashboard/uitgaven-per-maand' + params).then(r => r.json()),
+            fetch('/reports/dashboard/top-categorien' + params).then(r => r.json()),
+            fetch('/reports/dashboard/inkomsten-uitgaven' + params).then(r => r.json())
         ]);
         
         // Toon statistieken
@@ -401,6 +403,14 @@ function maakUitgavenChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            // DRILL-DOWN CLICK HANDLER!
+            onClick: function(event, elements) {
+                if (elements.length > 0) {
+                    const elementIndex = elements[0].index;
+                    const label = data.labels[elementIndex];
+                    toonMaandDetails(label, elementIndex);
+                }
+            },
             scales: {
                 y: {
                     beginAtZero: true,
@@ -416,12 +426,19 @@ function maakUitgavenChart(data) {
                     callbacks: {
                         label: function(context) {
                             return 'Uitgaven: €' + context.parsed.y.toLocaleString();
+                        },
+                        afterLabel: function(context) {
+                            return 'Klik voor details'; // Extra hint
                         }
                     }
                 },
                 legend: {
                     display: false
                 }
+            },
+            // Cursor veranderen bij hover
+            onHover: function(event, activeElements) {
+                event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
             }
         }
     });
@@ -429,6 +446,9 @@ function maakUitgavenChart(data) {
 
 function maakCategorienChart(data) {
     const ctx = document.getElementById('categorienChart').getContext('2d');
+    
+    // Sla data op voor click handling
+    categorieDataForClick = data;
     
     categorienChart = new Chart(ctx, {
         type: 'doughnut',
@@ -444,6 +464,15 @@ function maakCategorienChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            // DRILL-DOWN CLICK HANDLER!
+            onClick: function(event, elements) {
+                if (elements.length > 0) {
+                    const elementIndex = elements[0].index;
+                    const categorieNaam = data.labels[elementIndex];
+                    const categorieId = data.categorie_ids[elementIndex];
+                    toonCategorieDetails(categorieNaam, categorieId);
+                }
+            },
             plugins: {
                 tooltip: {
                     callbacks: {
@@ -451,12 +480,19 @@ function maakCategorienChart(data) {
                             const total = context.dataset.data.reduce((a, b) => a + b, 0);
                             const percentage = ((context.parsed / total) * 100).toFixed(1);
                             return context.label + ': €' + context.parsed.toLocaleString() + ' (' + percentage + '%)';
+                        },
+                        afterLabel: function(context) {
+                            return 'Klik voor details'; // Extra hint
                         }
                     }
                 },
                 legend: {
                     position: 'bottom'
                 }
+            },
+            // Cursor veranderen bij hover
+            onHover: function(event, activeElements) {
+                event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
             }
         }
     });
@@ -524,133 +560,7 @@ function refreshDashboard() {
     laadDashboard();
 }
 
-let huidigDashboardJaar, huidigDashboardMaand;
-
-// Update de bestaande maakUitgavenChart functie om click events toe te voegen
-function maakUitgavenChart(data) {
-    const ctx = document.getElementById('uitgavenChart').getContext('2d');
-    
-    uitgavenChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: data.labels,
-            datasets: [{
-                label: 'Uitgaven',
-                data: data.data,
-                borderColor: colors.danger,
-                backgroundColor: colors.danger + '20',
-                tension: 0.4,
-                fill: true,
-                pointBackgroundColor: colors.danger,
-                pointBorderColor: '#fff',
-                pointBorderWidth: 2,
-                pointRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            // NIEUWE onClick handler
-            onClick: function(event, elements) {
-                if (elements.length > 0) {
-                    const elementIndex = elements[0].index;
-                    const label = data.labels[elementIndex];
-                    toonMaandDetails(label, elementIndex);
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return '€' + value.toLocaleString();
-                        }
-                    }
-                }
-            },
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return 'Uitgaven: €' + context.parsed.y.toLocaleString();
-                        },
-                        afterLabel: function(context) {
-                            return 'Klik voor details'; // Extra hint
-                        }
-                    }
-                },
-                legend: {
-                    display: false
-                }
-            },
-            // Cursor veranderen bij hover
-            onHover: function(event, activeElements) {
-                event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
-            }
-        }
-    });
-}
-
-// Update de bestaande maakCategorienChart functie om click events toe te voegen
-// Globale variabele om categorie IDs op te slaan
-let categorieDataForClick = null;
-
-// Aangepaste maakCategorienChart functie
-function maakCategorienChart(data) {
-    const ctx = document.getElementById('categorienChart').getContext('2d');
-    
-    // Sla data op voor click handling
-    categorieDataForClick = data;
-    
-    categorienChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: data.labels,
-            datasets: [{
-                data: data.data,
-                backgroundColor: data.colors,
-                borderWidth: 2,
-                borderColor: '#fff'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            // VERBETERDE onClick handler
-            onClick: function(event, elements) {
-                if (elements.length > 0) {
-                    const elementIndex = elements[0].index;
-                    const categorieNaam = data.labels[elementIndex];
-                    const categorieId = data.categorie_ids[elementIndex]; // Nu uit de data!
-                    toonCategorieDetails(categorieNaam, categorieId);
-                }
-            },
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                            const percentage = ((context.parsed / total) * 100).toFixed(1);
-                            return context.label + ': €' + context.parsed.toLocaleString() + ' (' + percentage + '%)';
-                        },
-                        afterLabel: function(context) {
-                            return 'Klik voor details'; // Extra hint
-                        }
-                    }
-                },
-                legend: {
-                    position: 'bottom'
-                }
-            },
-            // Cursor veranderen bij hover
-            onHover: function(event, activeElements) {
-                event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
-            }
-        }
-    });
-}
-
-// Nieuwe functie om maand details te tonen
+// DRILL-DOWN FUNCTIES
 function toonMaandDetails(maandLabel, maandIndex) {
     // Parse jaar en maand uit het label (bijv. "Jan 2025")
     const parts = maandLabel.split(' ');
@@ -670,8 +580,8 @@ function toonMaandDetails(maandLabel, maandIndex) {
     document.getElementById('drilldownModalLoading').classList.remove('d-none');
     modal.show();
     
-    // Fetch data
-    fetch(`/dashboard/maand-details?jaar=${jaar}&maand=${maand}`)
+    // Fetch data met nieuwe endpoint
+    fetch(`/reports/dashboard/maand-details?jaar=${jaar}&maand=${maand}`)
         .then(response => response.json())
         .then(data => {
             if (data.error) {
@@ -685,7 +595,6 @@ function toonMaandDetails(maandLabel, maandIndex) {
         });
 }
 
-// Nieuwe functie om categorie details te tonen
 function toonCategorieDetails(categorieNaam, categorieId) {
     // Open modal met loading state
     const modal = new bootstrap.Modal(document.getElementById('drilldownModal'));
@@ -700,9 +609,9 @@ function toonCategorieDetails(categorieNaam, categorieId) {
     const jaar = document.getElementById('eindJaar').value;
     const maand = document.getElementById('eindMaand').value;
     
-    // Fetch data
+    // Fetch data met nieuwe endpoint
     const categorieParam = categorieId !== null ? categorieId : 'null';
-    fetch(`/dashboard/categorie-details?categorie_id=${categorieParam}&jaar=${jaar}&maand=${maand}&periode=12`)
+    fetch(`/reports/dashboard/categorie-details?categorie_id=${categorieParam}&jaar=${jaar}&maand=${maand}&periode=12`)
         .then(response => response.json())
         .then(data => {
             if (data.error) {
@@ -716,21 +625,6 @@ function toonCategorieDetails(categorieNaam, categorieId) {
         });
 }
 
-// Helper functie om categorie ID te vinden op basis van naam
-function getCategorieIdByNaam(naam) {
-    // Deze functie is niet meer nodig omdat we IDs nu uit de data halen
-    // Maar laten we hem behouden voor backwards compatibility
-    if (!categorieDataForClick) return null;
-    
-    const index = categorieDataForClick.labels.indexOf(naam);
-    if (index !== -1) {
-        return categorieDataForClick.categorie_ids[index];
-    }
-    
-    return null;
-}
-
-// Nieuwe functies voor modal handling
 function resetModalContent() {
     document.getElementById('drilldownModalLoading').classList.add('d-none');
     document.getElementById('drilldownModalStats').classList.add('d-none');

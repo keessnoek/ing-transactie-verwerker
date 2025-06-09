@@ -18,7 +18,7 @@
                 <h5 class="mb-0"><i class="fas fa-plus me-2"></i>Nieuwe Categorie</h5>
             </div>
             <div class="card-body">
-                <form method="POST" action="{{ url_for('nieuwe_categorie') }}">
+                <form method="POST" action="{{ url_for('categories.nieuwe_categorie') }}">
                     <div class="row">
                         <div class="col-md-4">
                             <div class="mb-3">
@@ -111,7 +111,7 @@
                                 <td>
                                     <span class="badge bg-info">{{ cat[4] }}</span>
                                     {% if cat[4] > 0 %}
-                                    <a href="{{ url_for('categorie_suggesties', categorie_id=cat[0]) }}" class="btn btn-sm btn-outline-success ms-2">
+                                    <a href="{{ url_for('categories.categorie_suggesties', categorie_id=cat[0]) }}" class="btn btn-sm btn-outline-success ms-2">
                                         <i class="fas fa-magic me-1"></i>Suggesties
                                     </a>
                                     {% endif %}
@@ -135,7 +135,7 @@
                                         <button class="btn btn-sm btn-outline-primary" onclick="editCategory({{ cat[0] }}, '{{ cat[1] }}', '{{ cat[2] or '' }}', '{{ cat[3] }}')">
                                             <i class="fas fa-edit"></i>
                                         </button>
-                                        <form method="POST" action="{{ url_for('verwijder_categorie', categorie_id=cat[0]) }}" class="d-inline" onsubmit="return confirm('Weet je zeker dat je deze categorie wilt verwijderen?')">
+                                        <form method="POST" action="{{ url_for('categories.verwijder_categorie', categorie_id=cat[0]) }}" class="d-inline" onsubmit="return confirm('Weet je zeker dat je deze categorie wilt verwijderen?')">
                                             <button type="submit" class="btn btn-sm btn-outline-danger">
                                                 <i class="fas fa-trash"></i>
                                             </button>
@@ -195,7 +195,7 @@
 {% block scripts %}
 <script>
 function editCategory(id, naam, beschrijving, kleur) {
-    document.getElementById('editForm').action = `/categorien/${id}/bewerken`;
+    document.getElementById('editForm').action = `/categories/${id}/bewerken`;
     document.getElementById('editNaam').value = naam;
     document.getElementById('editBeschrijving').value = beschrijving;
     document.getElementById('editKleur').value = kleur;

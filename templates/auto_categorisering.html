@@ -77,7 +77,7 @@
             <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
             <h5 class="text-muted">Geen automatische suggesties gevonden</h5>
             <p class="text-muted">Al je transacties lijken al goed gecategoriseerd te zijn, of er zijn geen duidelijke patronen gevonden.</p>
-            <a href="{{ url_for('categorien') }}" class="btn btn-primary">
+            <a href="{{ url_for('categories.categorien') }}" class="btn btn-primary">
                 <i class="fas fa-arrow-left me-1"></i>Terug naar Categorieën
             </a>
         </div>
@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function laadAnalyse() {
-    fetch('/rapportages/categoriseer-analyse')
+    fetch('/reports/categoriseer-analyse')
         .then(response => response.json())
         .then(data => {
             document.getElementById('loadingIndicator').classList.add('d-none');
@@ -331,7 +331,7 @@ function bekijkTransacties(index, categorieNaam, patronen) {
     modal.show();
     
     // Fetch transactie data
-    fetch('/rapportages/preview-transacties', {
+    fetch('/reports/preview-transacties', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -448,7 +448,7 @@ function categoriseerGeselecteerdUitModal() {
     button.disabled = true;
     button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Bezig...';
     
-    fetch('/rapportages/auto-categoriseren', {
+    fetch('/reports/auto-categoriseren', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -502,7 +502,7 @@ function categoriseer(index, categorieNaam, patronen) {
     button.disabled = true;
     button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Bezig...';
     
-    fetch('/rapportages/auto-categoriseren', {
+    fetch('/reports/auto-categoriseren', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
