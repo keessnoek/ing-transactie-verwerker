@@ -34,10 +34,10 @@
     </div>
     <div class="col-md-6 text-end">
         <div class="btn-group">
-            <button class="btn btn-outline-secondary btn-sm" onclick="toggleColumn('tegenrekening')">
+            <button class="btn btn-outline-secondary btn-sm" data-column-toggle="tegenrekening">
                 <i class="fas fa-eye-slash me-1"></i>Tegenrekening
             </button>
-            <button class="btn btn-outline-secondary btn-sm" onclick="toggleColumn('mededelingen')">
+            <button class="btn btn-outline-secondary btn-sm" data-column-toggle="mededelingen">
                 <i class="fas fa-eye-slash me-1"></i>Mededelingen
             </button>
         </div>
@@ -182,8 +182,7 @@
                                 </td>
                                 <td>
                                     <select class="form-select form-select-sm categorie-select" 
-                                            data-transactie-id="{{ transactie[0] }}"
-                                            onchange="updateCategorie(this)">
+                                            data-transactie-id="{{ transactie[0] }}">
                                         <option value="">Geen categorie</option>
                                         {% for cat in alle_categorien %}
                                         <option value="{{ cat[0] }}" 
@@ -225,100 +224,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-function toggleColumn(columnClass) {
-    const columns = document.querySelectorAll('.' + columnClass + '-col');
-    const isHidden = columns[0].style.display === 'none';
-    
-    columns.forEach(col => {
-        col.style.display = isHidden ? '' : 'none';
-    });
-    
-    const button = event.target.closest('button');
-    const icon = button.querySelector('i');
-    if (isHidden) {
-        icon.className = 'fas fa-eye-slash me-1';
-    } else {
-        icon.className = 'fas fa-eye me-1';
-    }
-}
-
-function updateCategorie(selectElement) {
-    const transactieId = selectElement.getAttribute('data-transactie-id');
-    const categorieId = selectElement.value;
-    const loadingIndicator = document.getElementById('loadingIndicator');
-    
-    loadingIndicator.classList.remove('d-none');
-    
-    fetch('/transactions/update-categorie', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `transactie_id=${transactieId}&categorie_id=${categorieId}`
-    })
-    .then(response => {
-        if (response.ok) {
-            selectElement.style.backgroundColor = '#d4edda';
-            setTimeout(() => {
-                selectElement.style.backgroundColor = '';
-            }, 1000);
-        } else {
-            throw new Error('Network response was not ok');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Er is een fout opgetreden bij het opslaan van de categorie.');
-        selectElement.selectedIndex = 0;
-    })
-    .finally(() => {
-        loadingIndicator.classList.add('d-none');
-    });
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    const sortableHeaders = document.querySelectorAll('.sortable-header');
-    
-    sortableHeaders.forEach(header => {
-        header.style.cursor = 'pointer';
-        header.addEventListener('click', function() {
-            const column = this.getAttribute('data-column');
-            const currentSort = '{{ current_sort }}';
-            const currentOrder = '{{ current_order }}';
-            
-            let newOrder = 'desc';
-            if (column === currentSort) {
-                newOrder = currentOrder === 'asc' ? 'desc' : 'asc';
-            } else {
-                if (column === 'naam' || column === 'code' || column === 'categorie') {
-                    newOrder = 'asc';
-                } else {
-                    newOrder = 'desc';
-                }
-            }
-            
-            const urlParams = new URLSearchParams(window.location.search);
-            urlParams.set('sort', column);
-            urlParams.set('order', newOrder);
-            
-            window.location.href = window.location.pathname + '?' + urlParams.toString();
-        });
-    });
-});
-</script>
-
-<style>
-.sortable-header {
-    user-select: none;
-}
-
-.sortable-header:hover {
-    background-color: #e9ecef !important;
-}
-
-.sortable-header i {
-    margin-left: 5px;
-}
-</style>
+<!-- Our modules in correct order -->
+<script src="{{ url_for('static', filename='js/utils/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/modules/transactions.js') }}"></script>
+<script src="{{ url_for('static', filename='js/main/transactions-init.js') }}"></script>
 {% endblock %}
